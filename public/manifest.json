@@ -1,0 +1,16 @@
+{
+  "name": "Digital Receipt Database",
+  "short_name": "ReceiptDB",
+  "description": "Receipt management application",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1e40af",
+  "icons": [
+    {
+      "src": "/icon.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg"
+    }
+  ]
+}

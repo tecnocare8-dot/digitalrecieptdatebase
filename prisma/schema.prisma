@@ -1,0 +1,104 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url = env("POSTGRES_PRISMA_URL") // Vercel Postgres uses this
+  directUrl = env("POSTGRES_URL_NON_POOLING") // Used for migrations
+}
+
+model Receipt {
+  id          Int      @id @default(autoincrement())
+  userId      String?
+  date        DateTime?
+  invoiceNumber String?
+  companyName String?
+  category    String?
+  memo        String?
+  totalAmount Int?
+  paymentMethod String?
+  imagePath   String
+  imageHash   String?
+  createdAt   DateTime @default(now())
+  user        User?    @relation(fields: [userId], references: [id])
+}
+
+model InvoiceIssuer {
+  invoiceNumber String   @id
+  legalName     String
+  updatedAt     DateTime @updatedAt
+}
+
+// ... (User model existing)
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  
+  // Custom relations
+  receipts      Receipt[]
+  settings      UserSettings?
+  apiUsageLogs  ApiUsageLog[]
+
+  // Stripe
+  isPro            Boolean   @default(false)
+  stripeCustomerId String?
+}
+
+model Account {
+  id                 String  @id @default(cuid())
+  userId             String
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String?
+  access_token       String?
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String?
+  session_state      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model UserSettings {
+  id            String @id @default(cuid())
+  userId        String @unique
+  driveFolderId String?
+  user          User   @relation(fields: [userId], references: [id])
+}
+
+model ApiUsageLog {
+  id        Int      @id @default(autoincrement())
+  userId    String
+  endpoint  String
+  timestamp DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
