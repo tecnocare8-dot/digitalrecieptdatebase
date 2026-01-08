@@ -15,7 +15,7 @@
     "csv-parse": "^6.1.0",
     "googleapis": "^169.0.0",
     "iconv-lite": "^0.7.0",
-    "next": "16.0.3",
+    "next": "16.0.4",
     "next-auth": "^5.0.0-beta.30",
     "prisma": "^5.22.0",
     "react": "19.2.0",
