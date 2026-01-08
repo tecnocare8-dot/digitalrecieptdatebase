@@ -127,8 +127,14 @@ export async function POST(request: NextRequest) {
                 },
             });
 
+            // Fetch user settings for folder name
+            const settings = await prisma.userSettings.findUnique({
+                where: { userId },
+            });
+            const folderName = settings?.driveFolderName || 'Receipt Scanner';
+
             if (account && account.access_token) {
-                await uploadToDrive(file, filename, account.access_token);
+                await uploadToDrive(file, filename, account.access_token, folderName);
             } else {
                 console.warn('⚠️ Google Account linked, but no access token found.');
             }

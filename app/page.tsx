@@ -303,8 +303,8 @@ export default function Home() {
 
           <div className="bg-blue-50 p-4 rounded-lg text-left text-sm text-blue-800 mb-4">
             <ul className="list-disc pl-5 space-y-1">
-              <li><strong>無料プラン</strong>: 5枚まで保存可能</li>
-              <li><strong>Proプラン</strong>: 無制限 & Google Drive連携</li>
+              <li><strong>無料プラン</strong>: 5枚まで・端末内保存のみ（Google Drive保存なし）</li>
+              <li><strong>Proプラン</strong>: 無制限保存 & Google Drive連携（画像永久保存）</li>
               <li><strong>安心設計</strong>: データは自分だけが見れます</li>
             </ul>
           </div>
@@ -346,6 +346,9 @@ export default function Home() {
           <div className="flex items-center gap-4">
             <Link href="/history" className="text-sm text-blue-600 hover:underline">
               履歴を見る →
+            </Link>
+            <Link href="/settings" className="text-sm text-gray-600 hover:text-gray-900">
+              ⚙️ 設定
             </Link>
             <LoginButton />
             {/* <img src="/company_logo.jpg" alt="Company Logo" className="h-10 w-auto object-contain" /> */}

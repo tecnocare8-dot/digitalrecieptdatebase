@@ -92,6 +92,7 @@ model UserSettings {
   id            String @id @default(cuid())
   userId        String @unique
   driveFolderId String?
+  driveFolderName String? @default("Receipt Scanner")
   user          User   @relation(fields: [userId], references: [id])
 }
 

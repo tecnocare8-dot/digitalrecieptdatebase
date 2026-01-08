@@ -1,16 +1,20 @@
 {
-  "name": "Digital Receipt Database",
-  "short_name": "ReceiptDB",
-  "description": "Receipt management application",
+  "name": "レシートスキャナーPro",
+  "short_name": "ReceiptApp",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#1e40af",
+  "theme_color": "#2563eb",
   "icons": [
     {
-      "src": "/icon.jpg",
+      "src": "/icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon.png",
       "sizes": "512x512",
-      "type": "image/jpeg"
+      "type": "image/png"
     }
   ]
 }

@@ -1,7 +1,7 @@
 import { google } from 'googleapis';
 import fs from 'fs';
 
-export async function uploadToDrive(file: File, filename: string, accessToken?: string): Promise<boolean> {
+export async function uploadToDrive(file: File, filename: string, accessToken?: string, folderName: string = 'Receipt Scanner'): Promise<boolean> {
     if (!accessToken) {
         console.warn('⚠️ No access token provided. Skipping Google Drive upload (Local only).');
         return false;
@@ -14,7 +14,7 @@ export async function uploadToDrive(file: File, filename: string, accessToken?: 
         const drive = google.drive({ version: 'v3', auth });
 
         // 1. Check or Create Folder
-        const FOLDER_NAME = 'Receipt Scanner';
+        const FOLDER_NAME = folderName; // Use user provided name
         let folderId = '';
 
         try {

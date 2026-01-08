@@ -56,13 +56,14 @@ export default function HistoryPage() {
                 r.totalAmount || '',
                 r.paymentMethod || '',
                 r.invoiceNumber || '',
-                r.imagePath || ''
+                r.invoiceNumber || '',
+                r.imagePath.startsWith('data:') ? '[画像データ]' : r.imagePath
             ].map(val => `"${val}"`).join(','); // Quote values
         });
 
         const csvContent = [header, ...rows].join('\n');
-        const bom = new Uint8Array([0xEF, 0xBB, 0xBF]); // BOM for Excel
-        const blob = new Blob([bom, csvContent], { type: 'text/csv;charset=utf-8;' });
+        // Use BOM for Excel compatibility (UTF-8 with BOM)
+        const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
 
         const link = document.createElement('a');
