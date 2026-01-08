@@ -93,15 +93,15 @@ export async function POST(request: NextRequest) {
         }
 
         const filename = `${datePart}_${safeCompanyName}_${price}_${suffix}_${safeCategory}.jpg`;
-        const uploadDir = path.join(process.cwd(), 'public/uploads');
+        const filename = `${datePart}_${safeCompanyName}_${price}_${suffix}_${safeCategory}.jpg`;
+        // const uploadDir = path.join(process.cwd(), 'public/uploads'); 
 
-        // Ensure directory exists (redundant but safe)
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
-        }
+        // on Vercel, filesystem is read-only. We cannot save to public/uploads.
+        // We will store the image as Base64 Data URI in the database for now (Small App / MVP).
+        // For production scale, use Vercel Blob or S3.
 
-        const filePath = path.join(uploadDir, filename);
-        await writeFile(filePath, buffer);
+        // Convert buffer to Base64
+        const base64Image = `data:${file.type || 'image/jpeg'};base64,${buffer.toString('base64')}`;
 
         // Save to DB
         const receipt = await prisma.receipt.create({
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
                 memo: memo || null,
                 totalAmount: totalAmountStr ? parseInt(totalAmountStr, 10) : null,
                 paymentMethod: paymentMethod || '現金',
-                imagePath: `/uploads/${filename}`,
+                imagePath: base64Image, // Use Data URI
                 imageHash: hash,
             },
         });
