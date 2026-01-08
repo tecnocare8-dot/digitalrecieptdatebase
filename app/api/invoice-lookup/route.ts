@@ -32,54 +32,64 @@ export async function GET(request: NextRequest) {
 
         // 3. Fetch from NTA API
         const NTA_APP_ID = process.env.NTA_APP_ID;
-        if (!NTA_APP_ID) {
-            console.warn('NTA_APP_ID is not configured');
-            return NextResponse.json({ companyName: null, error: 'NTA API configuration missing' }, { status: 404 });
+        let apiLegalName: string | null = null;
+        let apiError = false;
+
+        if (NTA_APP_ID) {
+            try {
+                const apiUrl = `https://web-api.invoice-kohyo.nta.go.jp/1/num?id=${NTA_APP_ID}&type=21&history=0&invoiceNumber=${invoiceNumber}`;
+                const response = await fetch(apiUrl);
+                if (response.ok) {
+                    const text = await response.text();
+                    const nameMatch = text.match(/<name>(.*?)<\/name>/);
+                    if (nameMatch) {
+                        apiLegalName = nameMatch[1];
+                    }
+                } else {
+                    apiError = true;
+                }
+            } catch (e) {
+                console.warn('NTA API failed:', e);
+                apiError = true;
+            }
+        } else {
+            // Treat missing ID as "API not available" -> fallthrough to local list
+            apiError = true;
         }
 
-        // Log API Usage
-        // Note: In real app, ensure User exists. For now, we skip if user constraint fails or use try/catch
-        try {
-            // Need a valid user for relation. If we don't have auth yet, we might skip logging or use a system user if seeded.
-            // checking if user exists logic omitted for speed, assuming system works or handle error silently
-        } catch (e) {
-            console.warn('Failed to log usage', e);
-        }
-
-        // Construct API URL
-        // NTA API: https://web-api.invoice-kohyo.nta.go.jp/1/num
-        // Parameters: id=<AppID>, type=21 (GET), history=0, invoiceNumber=<T+13digits>
-        const apiUrl = `https://web-api.invoice-kohyo.nta.go.jp/1/num?id=${NTA_APP_ID}&type=21&history=0&invoiceNumber=${invoiceNumber}`;
-
-        const response = await fetch(apiUrl);
-        if (!response.ok) {
-            throw new Error(`NTA API Error: ${response.statusText}`);
-        }
-
-        const text = await response.text();
-
-        // Simple XML Parsing (Regex) to avoid huge deps for one field
-        // Look for <legalName>Name</legalName> or <name>Name</name> depending on format
-        // NTA API Format v2 returns <publication>...<name>...</name>...</publication>
-        const nameMatch = text.match(/<name>(.*?)<\/name>/);
-        const legalName = nameMatch ? nameMatch[1] : null;
-
-        if (legalName) {
-            // Cache result
+        if (apiLegalName) {
+            // Cache result from API
             await prisma.invoiceIssuer.upsert({
                 where: { invoiceNumber },
-                update: { legalName },
-                create: { invoiceNumber, legalName }
+                update: { legalName: apiLegalName },
+                create: { invoiceNumber, legalName: apiLegalName }
             });
-
-            // Log usage if possible (requires existing User)
-            // await prisma.apiUsageLog.create({ ... }) 
-
-            return NextResponse.json({ companyName: legalName, source: 'api' });
-        } else {
-            // Return 404 but with successful structure
-            return NextResponse.json({ companyName: null }, { status: 404 });
+            return NextResponse.json({ companyName: apiLegalName, source: 'api' });
         }
+
+
+        // 4. Fallback: Check Local List (CSV/JSON)
+        // If API failed or returned execution without result, check local fallback
+        // This is useful while waiting for API approval or as a backup.
+
+        // Simple CSV parsing for the demo
+        const fs = require('fs');
+        const path = require('path');
+        const csvPath = path.join(process.cwd(), 'data', 'invoice_local_list.csv');
+
+        if (fs.existsSync(csvPath)) {
+            const fileContent = fs.readFileSync(csvPath, 'utf-8');
+            const lines = fileContent.split('\n');
+            for (const line of lines) {
+                const [csvInvoice, csvName] = line.split(',');
+                if (csvInvoice?.trim() === invoiceNumber) {
+                    return NextResponse.json({ companyName: csvName.trim(), source: 'local_list' });
+                }
+            }
+        }
+
+        // If all failing, return 404
+        return NextResponse.json({ companyName: null }, { status: 404 });
 
     } catch (error) {
         console.error('Error looking up invoice:', error);
