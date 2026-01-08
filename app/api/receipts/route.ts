@@ -93,7 +93,6 @@ export async function POST(request: NextRequest) {
         }
 
         const filename = `${datePart}_${safeCompanyName}_${price}_${suffix}_${safeCategory}.jpg`;
-        const filename = `${datePart}_${safeCompanyName}_${price}_${suffix}_${safeCategory}.jpg`;
         // const uploadDir = path.join(process.cwd(), 'public/uploads'); 
 
         // on Vercel, filesystem is read-only. We cannot save to public/uploads.
