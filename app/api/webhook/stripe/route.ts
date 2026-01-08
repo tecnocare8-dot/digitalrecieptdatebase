@@ -8,11 +8,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 });
 
 // Disable body parsing for webhook verification
-export const config = {
-    api: {
-        bodyParser: false,
-    },
-};
+export const dynamic = 'force-dynamic'; // Disable static optimization for webhook
 
 export async function POST(req: Request) {
     const body = await req.text();
