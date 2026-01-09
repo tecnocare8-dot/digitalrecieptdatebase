@@ -16,10 +16,7 @@ export const metadata: Metadata = {
   title: "Digital Receipt Database",
   description: "Manage your receipts and invoices",
   manifest: "/manifest.json",
-  icons: {
-    icon: "/icon.png",
-    apple: "/icon.png",
-  },
+
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
