@@ -17,8 +17,8 @@ export const metadata: Metadata = {
   description: "Manage your receipts and invoices",
   manifest: "/manifest.json",
   icons: {
-    icon: "/icon.jpg",
-    apple: "/icon.jpg",
+    icon: "/icon.png",
+    apple: "/icon.png",
   },
   appleWebApp: {
     capable: true,
