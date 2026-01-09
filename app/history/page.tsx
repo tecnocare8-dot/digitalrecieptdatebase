@@ -157,7 +157,7 @@ export default function HistoryPage() {
                                 CSVダウンロード
                             </button>
                         </div>
-                        <img src="/company_logo.jpg" alt="Company Logo" className="h-10 w-auto object-contain" />
+                        <img src="/icon.png" alt="Company Logo" className="h-10 w-auto object-contain" />
                     </div>
                 </div>
 
