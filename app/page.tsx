@@ -331,9 +331,9 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-100 p-4 relative">
+    <main className="min-h-screen bg-gray-100 px-4 pb-4 pt-[calc(env(safe-area-inset-top)+5rem)] relative">
       {isDemo && (
-        <div className="fixed top-0 left-0 w-full bg-yellow-400 text-yellow-900 text-center text-sm font-bold p-2 z-50 shadow-md">
+        <div className="fixed top-0 left-0 w-full bg-yellow-400 text-yellow-900 text-center text-sm font-bold p-2 pt-[calc(env(safe-area-inset-top)+0.5rem)] z-50 shadow-md">
           ⚠ デモモード中 (保存機能は利用できません)
           <button onClick={() => signIn('google')} className="ml-4 underline text-blue-800">
             ログインして保存する
