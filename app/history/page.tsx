@@ -143,7 +143,7 @@ export default function HistoryPage() {
 
 
     return (
-        <div className="min-h-screen bg-gray-50 px-4 pb-4 pt-[calc(env(safe-area-inset-top)+3rem)]">
+        <div className="min-h-screen bg-gray-50 px-4 pb-4 pt-[calc(env(safe-area-inset-top)+5rem)]">
             {/* ... existing header and table code ... */}
             <div className="max-w-4xl mx-auto">
                 <div className="flex justify-between items-center mb-6">
