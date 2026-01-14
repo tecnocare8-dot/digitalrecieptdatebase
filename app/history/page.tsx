@@ -36,7 +36,8 @@ export default function HistoryPage() {
         minAmount: '',
         maxAmount: '',
         keyword: '',
-        paymentMethod: ''
+        paymentMethod: '',
+        includeDeleted: false
     });
 
     useEffect(() => {
@@ -47,7 +48,7 @@ export default function HistoryPage() {
         try {
             const query = new URLSearchParams();
             Object.entries(filters).forEach(([key, value]) => {
-                if (value) query.append(key, value);
+                if (value) query.append(key, value.toString());
             });
 
             const res = await fetch(`/api/receipts/list?${query.toString()}`);
@@ -233,11 +234,22 @@ export default function HistoryPage() {
                                             <option value="電子マネー">電子マネー</option>
                                         </select>
                                     </div>
+                                    <div className="mt-2 flex items-center">
+                                        <label className="flex items-center text-xs text-gray-500 hover:text-gray-700 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={filters.includeDeleted}
+                                                onChange={e => setFilters({ ...filters, includeDeleted: e.target.checked })}
+                                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-4 w-4 mr-2"
+                                            />
+                                            削除済み（論理削除）も含めて検索する
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
                             <div className="mt-4 flex justify-end gap-2">
                                 <button onClick={() => {
-                                    setFilters({ startDate: '', endDate: '', minAmount: '', maxAmount: '', keyword: '', paymentMethod: '' });
+                                    setFilters({ startDate: '', endDate: '', minAmount: '', maxAmount: '', keyword: '', paymentMethod: '', includeDeleted: false });
                                     fetchReceipts();
                                 }} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded">クリア</button>
                                 <button onClick={fetchReceipts} className="px-6 py-2 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700 shadow-sm">検索実行</button>

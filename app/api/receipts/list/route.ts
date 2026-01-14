@@ -20,12 +20,17 @@ export async function GET(request: Request) {
         const maxAmount = url.searchParams.get('maxAmount');
         const keyword = url.searchParams.get('keyword'); // company, category, memo
         const paymentMethod = url.searchParams.get('paymentMethod');
+        const includeDeleted = url.searchParams.get('includeDeleted') === 'true';
 
         // Build where clause
         const where: any = {
             userId: userId,
-            isActive: true, // Only active receipts
         };
+
+        // Filter active status unless includeDeleted is true
+        if (!includeDeleted) {
+            where.isActive = true;
+        }
 
         if (startDate || endDate) {
             where.date = {};
