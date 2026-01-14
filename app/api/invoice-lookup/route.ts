@@ -40,10 +40,11 @@ export async function GET(request: NextRequest) {
                 const apiUrl = `https://web-api.invoice-kohyo.nta.go.jp/1/num?id=${NTA_APP_ID}&type=21&history=0&invoiceNumber=${invoiceNumber}`;
                 const response = await fetch(apiUrl);
                 if (response.ok) {
-                    const text = await response.text();
-                    const nameMatch = text.match(/<name>(.*?)<\/name>/);
-                    if (nameMatch) {
-                        apiLegalName = nameMatch[1];
+                    const data = await response.json();
+                    // NTA API returns data.result which is an array
+                    if (data.result && data.result.length > 0) {
+                        // Check for valid process code if needed, but commonly existence of result implies success for valid ID
+                        apiLegalName = data.result[0].name;
                     }
                 } else {
                     apiError = true;
