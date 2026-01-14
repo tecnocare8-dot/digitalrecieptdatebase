@@ -37,14 +37,12 @@ export async function GET(request: NextRequest) {
 
         if (NTA_APP_ID) {
             try {
-                const apiUrl = `https://web-api.invoice-kohyo.nta.go.jp/1/num?id=${NTA_APP_ID}&type=21&history=0&invoiceNumber=${invoiceNumber}`;
+                const apiUrl = `https://web-api.invoice-kohyo.nta.go.jp/1/num?id=${NTA_APP_ID}&type=21&history=0&number=${invoiceNumber}`;
                 const response = await fetch(apiUrl);
                 if (response.ok) {
                     const data = await response.json();
-                    // NTA API returns data.result which is an array
-                    if (data.result && data.result.length > 0) {
-                        // Check for valid process code if needed, but commonly existence of result implies success for valid ID
-                        apiLegalName = data.result[0].name;
+                    if (data.announcement && data.announcement.length > 0) {
+                        apiLegalName = data.announcement[0].name;
                     }
                 } else {
                     apiError = true;
