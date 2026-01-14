@@ -4,6 +4,40 @@ import { unlink } from 'fs/promises';
 import path from 'path';
 import fs from 'fs';
 
+export async function GET(
+    request: NextRequest,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    try {
+        const { id } = await params;
+        const receiptId = parseInt(id, 10);
+
+        if (isNaN(receiptId)) {
+            return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
+        }
+
+        const receipt = await prisma.receipt.findUnique({
+            where: { id: receiptId },
+            include: {
+                // @ts-ignore
+                logs: {
+                    orderBy: { changedAt: 'desc' }
+                }
+            }
+        });
+
+        if (!receipt) {
+            return NextResponse.json({ error: 'Receipt not found' }, { status: 404 });
+        }
+
+        return NextResponse.json(receipt);
+    } catch (error) {
+        console.error('Error fetching receipt:', error);
+        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    }
+}
+
+
 export async function DELETE(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
@@ -16,7 +50,7 @@ export async function DELETE(
             return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
         }
 
-        // Find receipt to get image path
+        // Find receipt to get image path and snapshot
         const receipt = await prisma.receipt.findUnique({
             where: { id: receiptId },
         });
@@ -25,27 +59,21 @@ export async function DELETE(
             return NextResponse.json({ error: 'Receipt not found' }, { status: 404 });
         }
 
-        // Delete from DB
-        await prisma.receipt.delete({
-            where: { id: receiptId },
+        // Create Audit Log (Snapshot before delete)
+        await prisma.receiptLog.create({
+            data: {
+                receiptId: receiptId,
+                operationType: 'DELETE',
+                previousData: receipt as any, // Store full object
+                changedBy: 'user', // In a real app, use session.user.id
+            }
         });
 
-        // Delete image file
-        if (receipt.imagePath) {
-            // imagePath is like "/uploads/filename.jpg"
-            // We need absolute path
-            const relativePath = receipt.imagePath.startsWith('/') ? receipt.imagePath.slice(1) : receipt.imagePath;
-            const absolutePath = path.join(process.cwd(), 'public', relativePath);
-
-            if (fs.existsSync(absolutePath)) {
-                try {
-                    await unlink(absolutePath);
-                } catch (e) {
-                    console.error('Failed to delete image file', e);
-                    // Continue even if file delete fails
-                }
-            }
-        }
+        // Logical Delete
+        await prisma.receipt.update({
+            where: { id: receiptId },
+            data: { isActive: false }
+        });
 
         return NextResponse.json({ success: true });
     } catch (error) {
@@ -109,6 +137,16 @@ export async function PUT(
             }
         }
 
+        // Create Audit Log (Snapshot before update)
+        await prisma.receiptLog.create({
+            data: {
+                receiptId: receiptId,
+                operationType: 'UPDATE',
+                previousData: receipt as any,
+                changedBy: 'user',
+            }
+        });
+
         const updated = await prisma.receipt.update({
             where: { id: receiptId },
             data: {
@@ -119,7 +157,8 @@ export async function PUT(
                 memo,
                 totalAmount,
                 paymentMethod,
-                imagePath
+                imagePath,
+                updatedAt: new Date(), // Force update timestamp
             }
         });
 
