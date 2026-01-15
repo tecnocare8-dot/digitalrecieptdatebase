@@ -70,6 +70,26 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="mb-8">
+                    <h2 className="text-lg font-semibold text-gray-700 mb-4 border-b pb-2">ドキュメント・マニュアル</h2>
+                    <div className="space-y-4">
+                        <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                            <h3 className="font-bold text-gray-800 mb-2">ユーザー説明書</h3>
+                            <p className="text-sm text-gray-600 mb-3">アプリの詳しい使い方や、電子帳簿保存法対応機能についての説明書です。</p>
+                            <a href="/docs/user_manual.md" download="user_manual.md" className="inline-flex items-center px-4 py-2 bg-white border border-gray-300 rounded text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                                📄 ダウンロード (Markdown)
+                            </a>
+                        </div>
+                        <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                            <h3 className="font-bold text-gray-800 mb-2">実装仕様書 (電帳法対応)</h3>
+                            <p className="text-sm text-gray-600 mb-3">電子帳簿保存法の要件（検索機能、真実性確保など）に関する技術的な仕様書です。顧問税理士への説明にご利用ください。</p>
+                            <a href="/docs/compliance_specification.md" download="compliance_specification.md" className="inline-flex items-center px-4 py-2 bg-white border border-gray-300 rounded text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                                📄 ダウンロード (Markdown)
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mb-8">
                     <h2 className="text-lg font-semibold text-gray-700 mb-4 border-b pb-2">Google Drive連携設定</h2>
                     <form onSubmit={handleSave} className="space-y-4">
                         <div>
