@@ -37,16 +37,20 @@ export async function GET(request: NextRequest) {
 
         if (NTA_APP_ID) {
             try {
-                // API expects 13 digits without 'T'
-                const apiNumber = invoiceNumber.replace(/^T/i, '');
-                const apiUrl = `https://web-api.invoice-kohyo.nta.go.jp/1/num?id=${NTA_APP_ID}&type=21&history=0&number=${apiNumber}`;
+                // API expects T + 13 digits (14 chars)
+                // const apiNumber = invoiceNumber.replace(/^T/i, ''); // Revert: T is required
+                const apiUrl = `https://web-api.invoice-kohyo.nta.go.jp/1/num?id=${NTA_APP_ID}&type=21&history=1&number=${invoiceNumber}`;
+                console.log(`Fetching NTA API: ${apiUrl}`);
+
                 const response = await fetch(apiUrl);
                 if (response.ok) {
                     const data = await response.json();
+                    console.log('NTA API Response:', JSON.stringify(data));
                     if (data.announcement && data.announcement.length > 0) {
                         apiLegalName = data.announcement[0].name;
                     }
                 } else {
+                    console.error(`NTA API Error: ${response.status} ${response.statusText}`);
                     apiError = true;
                 }
             } catch (e) {
