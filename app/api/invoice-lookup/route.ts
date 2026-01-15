@@ -37,7 +37,9 @@ export async function GET(request: NextRequest) {
 
         if (NTA_APP_ID) {
             try {
-                const apiUrl = `https://web-api.invoice-kohyo.nta.go.jp/1/num?id=${NTA_APP_ID}&type=21&history=0&number=${invoiceNumber}`;
+                // API expects 13 digits without 'T'
+                const apiNumber = invoiceNumber.replace(/^T/i, '');
+                const apiUrl = `https://web-api.invoice-kohyo.nta.go.jp/1/num?id=${NTA_APP_ID}&type=21&history=0&number=${apiNumber}`;
                 const response = await fetch(apiUrl);
                 if (response.ok) {
                     const data = await response.json();
