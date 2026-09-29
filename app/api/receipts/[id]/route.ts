@@ -43,6 +43,7 @@ export async function PUT(
         const companyName = formData.get('companyName') as string;
         const totalAmount = parseInt(formData.get('totalAmount') as string);
         const paymentMethod = formData.get('paymentMethod') as string;
+        const category = formData.get('category') as string | null;
 
         const drive = await driveForUser(userId);
         const updated = await drive.updateReceipt(id, {
@@ -51,6 +52,7 @@ export async function PUT(
             companyName: companyName || null,
             totalAmount: isNaN(totalAmount) ? null : totalAmount,
             paymentMethod: paymentMethod || null,
+            category: category || null,
         });
         if (!updated) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 

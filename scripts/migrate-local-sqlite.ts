@@ -106,6 +106,7 @@ async function main() {
       companyName: r.companyName,
       totalAmount: r.totalAmount,
       paymentMethod: r.paymentMethod,
+      category: null,
       createdAt: (toDate(r.createdAt) ?? new Date()).toISOString(),
     };
     if (existing.has(keyOf(meta))) {

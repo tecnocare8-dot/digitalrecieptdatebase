@@ -13,6 +13,7 @@ export function toClientReceipt(r: ReceiptRecord) {
         companyName: r.companyName,
         totalAmount: r.totalAmount,
         paymentMethod: r.paymentMethod,
+        category: r.category,
         createdAt: r.createdAt,
         imageUrl: receiptImageUrl(r.id),
         driveUrl: fileUrl(r.id),
