@@ -18,6 +18,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     // Check URL query parameters for checkout status
@@ -47,6 +48,7 @@ export default function SettingsPage() {
 
   const handleCheckout = async () => {
     setCheckoutLoading(true);
+    setErrorMessage(null);
     try {
       const res = await fetch('/api/checkout', {
         method: 'POST',
@@ -57,11 +59,14 @@ export default function SettingsPage() {
         window.location.href = data.url;
       } else {
         const errorMsg = data.error || '決済の開始に失敗しました。';
+        setErrorMessage(errorMsg);
         alert(`【エラー】${errorMsg}`);
       }
     } catch (e: any) {
       console.error(e);
-      alert(`【通信エラー】${e.message || '決済APIへの接続に失敗しました。'}`);
+      const connErrMsg = e.message || '決済APIへの接続に失敗しました。';
+      setErrorMessage(connErrMsg);
+      alert(`【通信エラー】${connErrMsg}`);
     } finally {
       setCheckoutLoading(false);
     }
@@ -88,6 +93,13 @@ export default function SettingsPage() {
         {message && (
           <div className="mb-6 p-4 rounded-lg bg-blue-50 text-blue-800 font-medium border border-blue-200">
             {message}
+          </div>
+        )}
+
+        {errorMessage && (
+          <div className="mb-6 p-4 rounded-lg bg-red-50 text-red-800 font-medium border border-red-300 flex flex-col gap-1">
+            <span className="font-bold text-red-900">⚠️ 決済開始エラー:</span>
+            <span className="text-sm leading-relaxed">{errorMessage}</span>
           </div>
         )}
 

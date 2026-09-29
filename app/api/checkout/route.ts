@@ -5,12 +5,28 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const stripeKey = process.env.STRIPE_SECRET_KEY;
+    // Flexibly search for Stripe Secret Key in environment variables
+    const stripeKey = (
+      process.env.STRIPE_SECRET_KEY ||
+      process.env.STRIPE_KEY ||
+      process.env.STRIPE_SECRET ||
+      process.env.STRIPE_API_KEY ||
+      process.env.NEXT_PUBLIC_STRIPE_SECRET_KEY ||
+      ''
+    ).trim();
 
     if (!stripeKey) {
+      const stripeKeysFound = Object.keys(process.env).filter((k) =>
+        k.toUpperCase().includes('STRIPE')
+      );
+
+      const foundMsg = stripeKeysFound.length > 0
+        ? ` (検出された関連環境変数名: ${stripeKeysFound.join(', ')})`
+        : ' (Stripe関連の環境変数が検出されませんでした)';
+
       return NextResponse.json(
         {
-          error: 'Stripe APIキー (STRIPE_SECRET_KEY) が未設定です。Vercelの環境変数で sk_live_... または sk_test_... を設定してください。',
+          error: `Stripe Secret Key が未設定です。VercelのEnvironment Variablesで STRIPE_SECRET_KEY に sk_live_... を設定してください。${foundMsg}`,
         },
         { status: 500 }
       );
@@ -19,7 +35,7 @@ export async function POST(request: NextRequest) {
     if (stripeKey.startsWith('pk_')) {
       return NextResponse.json(
         {
-          error: 'STRIPE_SECRET_KEY に Publishable Key (pk_...) が指定されています。Vercelの環境変数で Secret Key (sk_live_... または sk_test_...) を設定してください。',
+          error: 'STRIPE_SECRET_KEY に Publishable Key (pk_...) が指定されています。秘密キー (sk_live_... または sk_test_...) を設定してください。',
         },
         { status: 500 }
       );
