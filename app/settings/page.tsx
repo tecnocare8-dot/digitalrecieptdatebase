@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
+import DriveFolderSetup, { type DriveStatus } from '@/components/DriveFolderSetup';
 
 interface SettingsData {
   isPro: boolean;
@@ -12,6 +13,7 @@ interface SettingsData {
   maxFreeReceipts: number;
   canAddReceipt: boolean;
   reason?: string;
+  drive: DriveStatus;
 }
 
 export default function SettingsPage() {
@@ -122,6 +124,14 @@ export default function SettingsPage() {
           <div className="p-4 rounded-xl bg-red-50 text-red-800 font-medium border border-red-300 flex flex-col gap-1">
             <span className="font-bold text-red-900">⚠️ エラー:</span>
             <span className="text-sm leading-relaxed">{errorMessage}</span>
+          </div>
+        )}
+
+        {/* Section: Google Drive */}
+        {settings?.drive && (
+          <div className="p-6 rounded-2xl border border-blue-200 bg-blue-50/40 space-y-4">
+            <h2 className="text-lg font-bold text-blue-900">📁 保存先（Googleドライブ）</h2>
+            <DriveFolderSetup drive={settings.drive} onChanged={fetchSettings} />
           </div>
         )}
 

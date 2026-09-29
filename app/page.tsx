@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { performOCR, ParsedReceipt, cancelOCR } from '@/utils/ocr';
 import ImagePreview from '@/components/ImagePreview';
 import { rotateImage, compressForUpload } from '@/utils/image-processing';
+import DriveFolderSetup, { type DriveStatus } from '@/components/DriveFolderSetup';
 
 type FormData = {
   date: string;
@@ -23,6 +24,7 @@ interface SubscriptionSettings {
   maxFreeReceipts: number;
   canAddReceipt: boolean;
   reason?: string;
+  drive: DriveStatus;
 }
 
 export default function Home() {
@@ -307,7 +309,7 @@ export default function Home() {
                 </span>
               ) : (
                 <span className="bg-gray-200 text-gray-700 px-2.5 py-0.5 rounded-full text-xs font-bold">
-                  無料プラン ({subSettings.receiptCount}/5件)
+                  無料プラン ({subSettings.receiptCount}/{subSettings.maxFreeReceipts}件)
                 </span>
               )}
             </div>
@@ -322,6 +324,14 @@ export default function Home() {
                 {checkoutLoading ? '処理中...' : subSettings.isExpired ? '再購入 (1,500円/年)' : 'Proへアップグレード (1,500円/年)'}
               </button>
             )}
+          </div>
+        )}
+
+        {/* 保存先が未設定なら、撮影より先にドライブの準備を案内する */}
+        {subSettings && (!subSettings.drive.connected || !subSettings.drive.folderExists) && (
+          <div className="mb-6 p-4 rounded-xl border-2 border-blue-300 bg-blue-50 space-y-3">
+            <h2 className="font-bold text-blue-900">はじめに：保存先のフォルダを用意しましょう</h2>
+            <DriveFolderSetup drive={subSettings.drive} onChanged={fetchSubSettings} />
           </div>
         )}
 

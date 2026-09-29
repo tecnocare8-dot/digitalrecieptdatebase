@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { createHash, randomUUID } from 'crypto';
-import { getSubscriptionStatus } from '@/lib/settings';
-import { requireUserId, UnauthorizedError, unauthorizedResponse } from '@/lib/auth';
-import { saveImage } from '@/lib/storage';
+import { addPermission, planStatus } from '@/lib/settings';
+import { requireUserId } from '@/lib/auth';
+import { driveForUser } from '@/lib/drive';
+import { errorResponse } from '@/lib/api-errors';
+import { toClientReceipt } from '@/lib/receipts';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,18 +14,7 @@ const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 export async function POST(request: NextRequest) {
     try {
         const userId = await requireUserId();
-
-        const subStatus = await getSubscriptionStatus(userId);
-        if (!subStatus.canAddReceipt) {
-            return NextResponse.json(
-                {
-                    error: subStatus.reason || '領収書の新規保存制限に達しています。',
-                    isExpired: subStatus.isExpired,
-                    isPro: subStatus.isPro,
-                },
-                { status: 402 }
-            );
-        }
+        const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
 
         const formData = await request.formData();
 
@@ -46,33 +36,40 @@ export async function POST(request: NextRequest) {
         }
 
         const buffer = Buffer.from(await file.arrayBuffer());
-
-        // Calculate Hash (kept for potential future use)
-        const hash = createHash('sha256').update(buffer).digest('hex');
+        const totalAmount = totalAmountStr ? parseInt(totalAmountStr, 10) : NaN;
 
         // Duplicate check disabled - same receipt can be saved multiple times
         // (e.g., toll road receipts on the same day)
 
-        const imageKey = `receipts/${userId}/${randomUUID()}.jpg`;
-        await saveImage(imageKey, buffer, file.type);
-
-        const receipt = await prisma.receipt.create({
-            data: {
-                userId,
-                date: dateStr ? new Date(dateStr) : null,
+        const drive = await driveForUser(userId);
+        let denied: string | null = null;
+        const record = await drive.addReceipt(
+            {
+                date: dateStr ? dateStr.slice(0, 10) : null,
                 invoiceNumber: invoiceNumber || null,
                 companyName: companyName || null,
-                totalAmount: totalAmountStr ? parseInt(totalAmountStr, 10) : null,
+                totalAmount: isNaN(totalAmount) ? null : totalAmount,
                 paymentMethod: paymentMethod || '現金',
-                imageKey,
-                imageHash: hash,
+                createdAt: new Date().toISOString(),
             },
-        });
+            buffer,
+            (count) => {
+                const permission = addPermission(user.proExpiresAt, count);
+                if (!permission.canAdd) denied = permission.reason;
+                return permission.canAdd;
+            }
+        );
 
-        return NextResponse.json({ success: true, receipt });
+        if (!record) {
+            const { isPro, isExpired } = planStatus(user.proExpiresAt);
+            return NextResponse.json(
+                { error: denied || '領収書の新規保存制限に達しています。', isExpired, isPro },
+                { status: 402 }
+            );
+        }
+
+        return NextResponse.json({ success: true, receipt: toClientReceipt(record) });
     } catch (error) {
-        if (error instanceof UnauthorizedError) return unauthorizedResponse();
-        console.error('Error saving receipt:', error);
-        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+        return errorResponse(error, 'Error saving receipt');
     }
 }

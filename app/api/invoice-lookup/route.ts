@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { requireUserId, UnauthorizedError, unauthorizedResponse } from '@/lib/auth';
+import { requireUserId } from '@/lib/auth';
+import { DriveAuthError, DriveFolderMissingError, driveForUser, type ReceiptRecord } from '@/lib/drive';
+import { errorResponse } from '@/lib/api-errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,11 +34,17 @@ export async function GET(request: NextRequest) {
     try {
         const userId = await requireUserId();
 
-        // 1. 本人が過去に同じ登録番号で保存した会社名
-        const lastReceipt = await prisma.receipt.findFirst({
-            where: { userId, invoiceNumber, companyName: { not: null } },
-            orderBy: { createdAt: 'desc' },
-        });
+        // 1. 本人が過去に同じ登録番号で保存した会社名（ドライブの一覧CSVから）。
+        //    ドライブ未連携・フォルダ未作成なら飛ばして国税庁の照会へ進む
+        let history: ReceiptRecord[] = [];
+        try {
+            history = await (await driveForUser(userId)).listReceipts();
+        } catch (e) {
+            if (!(e instanceof DriveAuthError) && !(e instanceof DriveFolderMissingError)) throw e;
+        }
+        const lastReceipt = history
+            .filter((r) => r.invoiceNumber === invoiceNumber && r.companyName)
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 
         if (lastReceipt?.companyName) {
             return NextResponse.json({ companyName: lastReceipt.companyName, source: 'history' });
@@ -51,8 +58,6 @@ export async function GET(request: NextRequest) {
 
         return NextResponse.json({ companyName: null }, { status: 404 });
     } catch (error) {
-        if (error instanceof UnauthorizedError) return unauthorizedResponse();
-        console.error('Error looking up invoice:', error);
-        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+        return errorResponse(error, 'Error looking up invoice');
     }
 }

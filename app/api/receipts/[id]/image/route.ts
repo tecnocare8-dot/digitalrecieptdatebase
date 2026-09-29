@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { requireUserId, UnauthorizedError, unauthorizedResponse } from '@/lib/auth';
-import { readImage } from '@/lib/storage';
+import { requireUserId } from '@/lib/auth';
+import { driveForUser } from '@/lib/drive';
+import { errorResponse } from '@/lib/api-errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,25 +12,19 @@ export async function GET(
     try {
         const userId = await requireUserId();
         const { id } = await params;
-        const receiptId = parseInt(id, 10);
-        if (isNaN(receiptId)) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-        const receipt = await prisma.receipt.findFirst({ where: { id: receiptId, userId } });
-        if (!receipt) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        const drive = await driveForUser(userId);
+        const image = await drive.downloadReceipt(id);
+        if (!image) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-        const image = await readImage(receipt.imageKey);
-        if (!image) return NextResponse.json({ error: 'Image not found' }, { status: 404 });
-
-        return new NextResponse(image.body as BodyInit, {
+        return new NextResponse(new Uint8Array(image), {
             headers: {
-                'Content-Type': image.contentType,
+                'Content-Type': 'image/jpeg',
                 // 本人しか見られない画像なので共有キャッシュには載せない
                 'Cache-Control': 'private, max-age=3600',
             },
         });
     } catch (error) {
-        if (error instanceof UnauthorizedError) return unauthorizedResponse();
-        console.error('Error reading receipt image:', error);
-        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+        return errorResponse(error, 'Error reading receipt image');
     }
 }
