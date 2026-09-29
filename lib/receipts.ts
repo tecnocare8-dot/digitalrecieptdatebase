@@ -1,32 +1,31 @@
-import { prisma } from '@/lib/prisma';
+import { fileUrl, type ReceiptRecord } from '@/lib/drive';
 
-export function receiptImageUrl(id: number) {
-    return `/api/receipts/${id}/image`;
+export function receiptImageUrl(id: string) {
+    return `/api/receipts/${encodeURIComponent(id)}/image`;
 }
 
-/** 本人の領収書を新しい順に返す。日付・金額・番号・会社名が同じものは1件にまとめる */
-export async function listUserReceipts(userId: string) {
-    const receipts = await prisma.receipt.findMany({
-        where: { userId },
-        orderBy: [
-            { date: 'desc' },
-            { id: 'desc' } // Ensure deterministic order (latest first)
-        ],
-    });
+/** 画面に返す形。画像はアプリ経由（本人確認付き）とドライブ上の両方のリンクを付ける */
+export function toClientReceipt(r: ReceiptRecord) {
+    return {
+        id: r.id,
+        date: r.date,
+        invoiceNumber: r.invoiceNumber,
+        companyName: r.companyName,
+        totalAmount: r.totalAmount,
+        paymentMethod: r.paymentMethod,
+        createdAt: r.createdAt,
+        imageUrl: receiptImageUrl(r.id),
+        driveUrl: fileUrl(r.id),
+    };
+}
 
-    const uniqueReceipts = [];
+/** 日付・金額・番号・会社名が同じものは1件にまとめる（以前からの一覧表示の仕様） */
+export function dedupeReceipts(records: ReceiptRecord[]) {
     const seen = new Set<string>();
-
-    for (const r of receipts) {
-        const dateStr = r.date ? r.date.toISOString().split('T')[0] : 'null';
-        const key = `${dateStr}|${r.totalAmount}|${r.invoiceNumber}|${r.companyName}`;
-
-        if (!seen.has(key)) {
-            seen.add(key);
-            const { imageKey: _imageKey, userId: _userId, ...rest } = r;
-            uniqueReceipts.push({ ...rest, imageUrl: receiptImageUrl(r.id) });
-        }
-    }
-
-    return uniqueReceipts;
+    return records.filter((r) => {
+        const key = `${r.date ?? 'null'}|${r.totalAmount}|${r.invoiceNumber}|${r.companyName}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
 }

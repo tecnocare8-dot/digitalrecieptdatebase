@@ -4,13 +4,14 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 
 interface Receipt {
-    id: number;
+    id: string;
     date: string | null;
     invoiceNumber: string | null;
     companyName: string | null;
     totalAmount: number | null;
     paymentMethod: string | null;
     imageUrl: string;
+    driveUrl: string;
 }
 
 export default function HistoryPage() {
@@ -36,13 +37,13 @@ export default function HistoryPage() {
         }
     };
 
-    const handleDelete = async (id: number) => {
+    const handleDelete = async (id: string) => {
         if (!confirm('本当にこのレシートを削除しますか？\n（画像ファイルも削除されます）')) {
             return;
         }
 
         try {
-            const res = await fetch(`/api/receipts/${id}`, {
+            const res = await fetch(`/api/receipts/${encodeURIComponent(id)}`, {
                 method: 'DELETE',
             });
 
@@ -73,7 +74,7 @@ export default function HistoryPage() {
             formData.append('totalAmount', (editingReceipt.totalAmount || 0).toString());
             formData.append('paymentMethod', editingReceipt.paymentMethod || '現金');
 
-            const res = await fetch(`/api/receipts/${editingReceipt.id}`, {
+            const res = await fetch(`/api/receipts/${encodeURIComponent(editingReceipt.id)}`, {
                 method: 'PUT',
                 body: formData,
             });
@@ -166,6 +167,9 @@ export default function HistoryPage() {
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                                 <a href={receipt.imageUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                                                     画像を見る
+                                                </a>
+                                                <a href={receipt.driveUrl} target="_blank" rel="noopener noreferrer" className="ml-3 text-gray-500 hover:underline">
+                                                    ドライブ
                                                 </a>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

@@ -16,36 +16,22 @@ datasource db {
   schemas   = ["app"]
 }
 
-// Googleログインした利用者。プラン状態は利用者ごとに持つ
+// Googleログインした利用者。領収書の画像・内容は利用者本人のGoogleドライブに保存し、
+// ここにはプラン状態と、ドライブへ書き込むための連携情報だけを持つ
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  name         String?
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  name               String?
   // Proの有効期限。null=一度も購入していない、過去日時=期限切れ
-  proExpiresAt DateTime?
-  createdAt    DateTime  @default(now())
-  receipts     Receipt[]
-  payments     Payment[]
+  proExpiresAt       DateTime?
+  // Googleのリフレッシュトークン（lib/crypto.ts で暗号化して保存）。null=ドライブ未連携
+  googleRefreshToken String?
+  // 領収書を保存するドライブのフォルダ（このアプリが作成したもの）
+  driveFolderId      String?
+  driveFolderName    String?
+  createdAt          DateTime  @default(now())
+  payments           Payment[]
 
-  @@schema("app")
-}
-
-model Receipt {
-  id            Int       @id @default(autoincrement())
-  userId        String
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  date          DateTime?
-  invoiceNumber String?
-  companyName   String?
-  totalAmount   Int?
-  paymentMethod String?
-  // Blobストレージ上のパス（非公開）。画像は /api/receipts/[id]/image から本人のみ取得できる
-  imageKey      String
-  imageHash     String?
-  createdAt     DateTime  @default(now())
-
-  @@index([userId, date])
-  @@index([userId, invoiceNumber])
   @@schema("app")
 }
 

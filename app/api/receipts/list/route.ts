@@ -1,16 +1,18 @@
 import { NextResponse } from 'next/server';
-import { listUserReceipts } from '@/lib/receipts';
-import { requireUserId, UnauthorizedError, unauthorizedResponse } from '@/lib/auth';
+import { requireUserId } from '@/lib/auth';
+import { driveForUser } from '@/lib/drive';
+import { errorResponse } from '@/lib/api-errors';
+import { dedupeReceipts, toClientReceipt } from '@/lib/receipts';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
     try {
         const userId = await requireUserId();
-        return NextResponse.json(await listUserReceipts(userId));
+        const drive = await driveForUser(userId);
+        const records = await drive.listReceipts();
+        return NextResponse.json(dedupeReceipts(records).map(toClientReceipt));
     } catch (error) {
-        if (error instanceof UnauthorizedError) return unauthorizedResponse();
-        console.error('Error fetching receipts:', error);
-        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+        return errorResponse(error, 'Error fetching receipts');
     }
 }

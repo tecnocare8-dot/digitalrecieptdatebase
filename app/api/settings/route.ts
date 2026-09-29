@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSubscriptionStatus } from '@/lib/settings';
-import { requireUserId, UnauthorizedError, unauthorizedResponse } from '@/lib/auth';
+import { requireUserId } from '@/lib/auth';
+import { errorResponse } from '@/lib/api-errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,8 +11,6 @@ export async function GET() {
     const status = await getSubscriptionStatus(userId);
     return NextResponse.json(status);
   } catch (error) {
-    if (error instanceof UnauthorizedError) return unauthorizedResponse();
-    console.error('Failed to get settings:', error);
-    return NextResponse.json({ error: 'Failed to retrieve settings' }, { status: 500 });
+    return errorResponse(error, 'Failed to get settings');
   }
 }

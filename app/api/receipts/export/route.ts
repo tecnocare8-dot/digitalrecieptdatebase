@@ -1,51 +1,24 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { listUserReceipts } from '@/lib/receipts';
-import { requireUserId, UnauthorizedError, unauthorizedResponse } from '@/lib/auth';
+import { NextResponse } from 'next/server';
+import { requireUserId } from '@/lib/auth';
+import { driveForUser } from '@/lib/drive';
+import { errorResponse } from '@/lib/api-errors';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+// ドライブに保存されている一覧CSVと同じ内容を返す
+export async function GET() {
     try {
         const userId = await requireUserId();
-        const receipts = await listUserReceipts(userId);
-        const origin = request.nextUrl.origin;
-
-        // CSV Header
-        const header = ['ID', '日付', '会社名', '登録番号', '金額', '支払い方法', '画像URL'];
-        const rows = receipts.map(r => [
-            r.id,
-            r.date ? r.date.toISOString().split('T')[0] : '',
-            r.companyName || '',
-            r.invoiceNumber || '',
-            r.totalAmount || '',
-            r.paymentMethod || '現金',
-            `${origin}${r.imageUrl}`
-        ]);
-
-        // Generate CSV String
-        // Add BOM for Excel compatibility
-        const bom = '﻿';
-        const csvContent = bom + [
-            header.join(','),
-            ...rows.map(row => row.map(field => {
-                // Escape quotes and wrap in quotes if necessary
-                const stringField = String(field);
-                if (stringField.includes(',') || stringField.includes('"') || stringField.includes('\n')) {
-                    return `"${stringField.replace(/"/g, '""')}"`;
-                }
-                return stringField;
-            }).join(','))
-        ].join('\n');
+        const drive = await driveForUser(userId);
+        const csvContent = await drive.ledgerCsv();
 
         return new NextResponse(csvContent, {
             headers: {
                 'Content-Type': 'text/csv; charset=utf-8',
-                'Content-Disposition': 'attachment; filename="receipts.csv"',
+                'Content-Disposition': `attachment; filename="receipts.csv"; filename*=UTF-8''${encodeURIComponent('領収書一覧.csv')}`,
             },
         });
     } catch (error) {
-        if (error instanceof UnauthorizedError) return unauthorizedResponse();
-        console.error('Error exporting CSV:', error);
-        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+        return errorResponse(error, 'Error exporting CSV');
     }
 }

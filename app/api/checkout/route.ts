@@ -26,6 +26,8 @@ export async function POST(request: NextRequest) {
           quantity: 1,
         },
       ],
+      // 決済画面に「プロモーションコードを追加」欄を出す（クーポンはStripeでプロモーションコードを発行して使う）
+      allow_promotion_codes: true,
       // どの利用者の支払いかを webhook / 戻り画面で特定するためのID
       client_reference_id: userId,
       customer_email: user.email,

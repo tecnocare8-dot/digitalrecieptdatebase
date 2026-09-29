@@ -21,7 +21,8 @@ export function getStripe(): Stripe {
  * 期限内に再購入した場合は、残り期間の末尾から1年延長する。
  */
 export async function grantProForSession(session: Stripe.Checkout.Session): Promise<'granted' | 'already' | 'not_paid'> {
-  if (session.payment_status !== 'paid') return 'not_paid';
+  // 100%割引クーポンでは支払いが発生せず 'no_payment_required' になる。これも購入完了として扱う
+  if (session.payment_status !== 'paid' && session.payment_status !== 'no_payment_required') return 'not_paid';
 
   const userId = session.client_reference_id;
   if (!userId) throw new Error(`Checkout Session ${session.id} に client_reference_id がありません。`);
