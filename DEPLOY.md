@@ -13,7 +13,9 @@ Vercel のサーバーはファイルを保存しても消えるため、SQLite 
 
 1. Vercel のプロジェクト → `Storage` → `Create Database` → **Neon (Postgres)** を作成し、このプロジェクトに接続
 2. 自動で `DATABASE_URL` と `DATABASE_URL_UNPOOLED` が環境変数に入ることを確認
-3. テーブルはデプロイ時に `prisma migrate deploy` で自動作成されます（`npm run build` に含まれています）
+3. テーブルはデプロイ時に `scripts/migrate-deploy.mjs`（`npm run build` に含まれています）で自動作成されます
+   - このアプリの表は **`app` スキーマ**に作ります。本番の Neon（`receipt-db`）の `public` スキーマには旧版アプリの表が残っており、
+     そちらには一切触れません。旧版の表が不要になったら、Neon の画面から `public` の表を削除して構いません
 
 ## 2. 画像の保存先（Vercel Blob）
 

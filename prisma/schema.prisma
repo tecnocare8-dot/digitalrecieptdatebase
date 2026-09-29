@@ -2,14 +2,18 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider      = "prisma-client-js"
-  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  provider        = "prisma-client-js"
+  binaryTargets   = ["native", "rhel-openssl-3.0.x"]
+  previewFeatures = ["multiSchema"]
 }
 
+// 本番のNeonには旧版アプリの表が public スキーマに残っているため、
+// このアプリの表は専用の app スキーマに置き、旧版の表とは混ぜない
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DATABASE_URL_UNPOOLED")
+  schemas   = ["app"]
 }
 
 // Googleログインした利用者。プラン状態は利用者ごとに持つ
@@ -22,6 +26,8 @@ model User {
   createdAt    DateTime  @default(now())
   receipts     Receipt[]
   payments     Payment[]
+
+  @@schema("app")
 }
 
 model Receipt {
@@ -40,6 +46,7 @@ model Receipt {
 
   @@index([userId, date])
   @@index([userId, invoiceNumber])
+  @@schema("app")
 }
 
 // Stripe Checkout 1回ごとの記録。stripeSessionId の一意制約で、webhook と戻り画面の確認が
@@ -52,4 +59,6 @@ model Payment {
   amount          Int
   currency        String
   createdAt       DateTime @default(now())
+
+  @@schema("app")
 }

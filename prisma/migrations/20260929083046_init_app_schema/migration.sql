@@ -1,5 +1,8 @@
+-- CreateSchema
+CREATE SCHEMA IF NOT EXISTS "app";
+
 -- CreateTable
-CREATE TABLE "User" (
+CREATE TABLE "app"."User" (
     "id" TEXT NOT NULL,
     "email" TEXT NOT NULL,
     "name" TEXT,
@@ -10,7 +13,7 @@ CREATE TABLE "User" (
 );
 
 -- CreateTable
-CREATE TABLE "Receipt" (
+CREATE TABLE "app"."Receipt" (
     "id" SERIAL NOT NULL,
     "userId" TEXT NOT NULL,
     "date" TIMESTAMP(3),
@@ -26,7 +29,7 @@ CREATE TABLE "Receipt" (
 );
 
 -- CreateTable
-CREATE TABLE "Payment" (
+CREATE TABLE "app"."Payment" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "stripeSessionId" TEXT NOT NULL,
@@ -38,19 +41,19 @@ CREATE TABLE "Payment" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+CREATE UNIQUE INDEX "User_email_key" ON "app"."User"("email");
 
 -- CreateIndex
-CREATE INDEX "Receipt_userId_date_idx" ON "Receipt"("userId", "date");
+CREATE INDEX "Receipt_userId_date_idx" ON "app"."Receipt"("userId", "date");
 
 -- CreateIndex
-CREATE INDEX "Receipt_userId_invoiceNumber_idx" ON "Receipt"("userId", "invoiceNumber");
+CREATE INDEX "Receipt_userId_invoiceNumber_idx" ON "app"."Receipt"("userId", "invoiceNumber");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Payment_stripeSessionId_key" ON "Payment"("stripeSessionId");
+CREATE UNIQUE INDEX "Payment_stripeSessionId_key" ON "app"."Payment"("stripeSessionId");
 
 -- AddForeignKey
-ALTER TABLE "Receipt" ADD CONSTRAINT "Receipt_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "app"."Receipt" ADD CONSTRAINT "Receipt_userId_fkey" FOREIGN KEY ("userId") REFERENCES "app"."User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Payment" ADD CONSTRAINT "Payment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "app"."Payment" ADD CONSTRAINT "Payment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "app"."User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
