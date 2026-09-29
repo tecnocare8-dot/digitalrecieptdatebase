@@ -4,7 +4,12 @@
 
 /** 画面側（utils/fingerprint.ts）で作る、1枚のレシートの手がかり */
 export interface ReceiptSignals {
-  /** レシート上部の見た目の指紋（64bitのdHashを16桁の16進数で） */
+  /**
+   * 画像認識モデル（MobileNet）による見た目の特徴。レシート上部256＋全体256の8bit値をbase64にしたもの。
+   * 見た目での判別の主役（実写144枚の検証で、単純な指紋より大幅に良かった）。モデルが読めない環境では null
+   */
+  embedding: string | null;
+  /** レシート上部の見た目の指紋（64bitのdHashを16桁の16進数で）。精度が低いので候補の提示にだけ使う */
   headerHash: string | null;
   /** レシート全体の見た目の指紋 */
   wholeHash: string | null;
@@ -18,6 +23,7 @@ export interface ReceiptSignals {
 
 export interface StoreFingerprint {
   receiptId: string;
+  embedding?: string | null;
   headerHash: string | null;
   wholeHash: string | null;
   headerHue: number[] | null;
@@ -61,7 +67,7 @@ export interface StoreSuggestion {
   reasons: string[];
 }
 
-const MAX_FINGERPRINTS_PER_STORE = 12;
+const MAX_FINGERPRINTS_PER_STORE = 8;
 const MAX_PHONES_PER_STORE = 5;
 /** 自動入力してよい一致度 */
 export const AUTO_FILL_SCORE = 70;
@@ -111,23 +117,46 @@ function histogramSimilarity(a: number[], b: number[]): number {
   return s;
 }
 
-/** 見た目（ロゴ・配置・色）の一致度 0〜1 と、その理由 */
-function visualSimilarity(sig: ReceiptSignals, fps: StoreFingerprint[]): { score: number; reason: string | null } {
+/**
+ * 画像認識モデルの特徴で、1位のお店が2位のお店をこれだけ上回れば、見た目だけで自動入力してよい。
+ * 実写144枚（29店）を learn/matchStores に通した検証で、この差以上のときの正解率は95%（57/60枚）だった。
+ * 0.06 では94%（63/67枚）だったため、少し厳しくしている
+ */
+export const EMBEDDING_MARGIN = 0.07;
+const EMBED_BYTES = 512;
+
+function decodeEmbedding(b64: string | null | undefined): Int8Array | null {
+  if (!b64) return null;
+  const buf = Buffer.from(b64, 'base64');
+  return buf.length === EMBED_BYTES ? new Int8Array(buf.buffer, buf.byteOffset, buf.length) : null;
+}
+
+function cosine(a: Int8Array, b: Int8Array, from: number, to: number): number {
+  let s = 0, na = 0, nb = 0;
+  for (let i = from; i < to; i++) { s += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  return na && nb ? s / Math.sqrt(na * nb) : 0;
+}
+
+/** レシート上部と全体の特徴の近さの平均（-1〜1） */
+function embeddingSimilarity(a: Int8Array, b: Int8Array): number {
+  const half = EMBED_BYTES / 2;
+  return (cosine(a, b, 0, half) + cosine(a, b, half, EMBED_BYTES)) / 2;
+}
+
+/** 単純な指紋（dHash・色）の一致度 0〜1 と、その理由。精度が低いので候補の提示にだけ使う */
+function hashSimilarity(sig: ReceiptSignals, fps: StoreFingerprint[]): { score: number; reason: string | null } {
   let best = 0;
   let reason: string | null = null;
   for (const fp of fps) {
     let s = 0;
     const parts: string[] = [];
     if (sig.headerHash && fp.headerHash) {
-      const d = hamming(sig.headerHash, fp.headerHash);
-      // 64bit中の違いが少ないほど似ている。12bit以上違えば別物とみなす
-      const h = Math.max(0, 1 - d / 12);
+      const h = Math.max(0, 1 - hamming(sig.headerHash, fp.headerHash) / 12);
       s += 0.7 * h;
       if (h > 0.5) parts.push('ロゴ・上部のデザイン');
     }
     if (sig.wholeHash && fp.wholeHash) {
-      const d = hamming(sig.wholeHash, fp.wholeHash);
-      const w = Math.max(0, 1 - d / 16);
+      const w = Math.max(0, 1 - hamming(sig.wholeHash, fp.wholeHash) / 16);
       s += 0.15 * w;
       if (w > 0.5) parts.push('全体の配置');
     }
@@ -138,7 +167,7 @@ function visualSimilarity(sig: ReceiptSignals, fps: StoreFingerprint[]): { score
     }
     if (s > best) {
       best = s;
-      reason = parts.length ? `${parts.join('・')}が一致` : null;
+      reason = parts.length ? `${parts.join('・')}が似ている` : null;
     }
   }
   return { score: best, reason };
@@ -146,10 +175,30 @@ function visualSimilarity(sig: ReceiptSignals, fps: StoreFingerprint[]): { score
 
 /**
  * 新しいレシートの手がかりから、過去に学習したお店を一致度の高い順に返す。
- * 登録番号・電話番号・店名の文字は強い手がかり。見た目だけの場合は、よく似ていて2位と差があるときだけ高得点にする
+ * - 登録番号・電話番号・店名の文字が一致 → 強い手がかり（自動入力）
+ * - 画像認識の特徴で、1位が2位を EMBEDDING_MARGIN 以上上回る → 見た目だけでも自動入力
+ * - それ以外の見た目の近さ → 候補として出すだけ（自動入力しない）
  */
 export function matchStores(patterns: PatternsFile, sig: ReceiptSignals, ocrInvoiceNumber: string | null, limit = 3): StoreSuggestion[] {
   const text = normalizeName(sig.text ?? '');
+
+  // 画像認識の特徴で、お店ごとに一番近い1枚との近さを出し、1位と2位の差を見る
+  const emb = decodeEmbedding(sig.embedding);
+  const embSim = new Map<StorePattern, number>();
+  if (emb) {
+    for (const p of patterns.stores) {
+      let best = -Infinity;
+      for (const fp of p.fingerprints) {
+        const other = decodeEmbedding(fp.embedding);
+        if (other) best = Math.max(best, embeddingSimilarity(emb, other));
+      }
+      if (best > -Infinity) embSim.set(p, best);
+    }
+  }
+  const embRanked = [...embSim.entries()].sort((a, b) => b[1] - a[1]);
+  const embLeader = embRanked.length >= 2 && embRanked[0][1] - embRanked[1][1] >= EMBEDDING_MARGIN ? embRanked[0][0] : null;
+  const embNearest = embRanked[0]?.[0] ?? null;
+
   const scored = patterns.stores.map((p) => {
     let score = 0;
     const reasons: string[] = [];
@@ -166,22 +215,25 @@ export function matchStores(patterns: PatternsFile, sig: ReceiptSignals, ocrInvo
       score = Math.max(score, 85);
       reasons.push('店名の文字が一致');
     }
-    const visual = visualSimilarity(sig, p.fingerprints);
-    const visualScore = Math.round(visual.score * 85);
-    if (visual.reason && visualScore > 0) {
-      if (visualScore > score) score = visualScore;
-      else score = Math.min(100, score + 5); // 文字と見た目の両方が合えば少し上げる
-      reasons.push(visual.reason);
+
+    const strongText = score > 0;
+    if (p === embLeader) {
+      score = strongText ? Math.min(100, score + 5) : 80;
+      reasons.push('ロゴ・デザインが一致（画像認識）');
+    } else if (p === embNearest && !strongText) {
+      score = Math.max(score, 50);
+      reasons.push('ロゴ・デザインが似ている');
+    } else {
+      const hash = hashSimilarity(sig, p.fingerprints);
+      if (hash.reason && !strongText) {
+        score = Math.max(score, Math.min(AUTO_FILL_SCORE - 15, Math.round(hash.score * 60)));
+        reasons.push(hash.reason);
+      }
     }
-    return { p, score, reasons, visualOnly: reasons.length > 0 && !reasons.some((r) => /番号|文字/.test(r)) };
+    return { p, score, reasons };
   });
 
   scored.sort((a, b) => b.score - a.score || b.p.count - a.p.count);
-
-  // 見た目だけで1位を決める場合、2位と僅差なら自信がないので自動入力の基準より下げる
-  if (scored.length >= 2 && scored[0].visualOnly && scored[0].score - scored[1].score < 10) {
-    scored[0].score = Math.min(scored[0].score, AUTO_FILL_SCORE - 1);
-  }
 
   return scored
     .filter((s) => s.score > 0)
@@ -249,9 +301,10 @@ export function learn(patterns: PatternsFile, input: LearnInput): PatternsFile {
   const inc = (m: Record<string, number>, k: string | null) => (k ? { ...m, [k]: (m[k] ?? 0) + 1 } : m);
 
   const fingerprints = [...base.fingerprints.filter((f) => f.receiptId !== input.receiptId)];
-  if (input.signals && (input.signals.headerHash || input.signals.wholeHash)) {
+  if (input.signals && (input.signals.embedding || input.signals.headerHash || input.signals.wholeHash)) {
     fingerprints.push({
       receiptId: input.receiptId,
+      embedding: input.signals.embedding,
       headerHash: input.signals.headerHash,
       wholeHash: input.signals.wholeHash,
       headerHue: input.signals.headerHue,
@@ -287,7 +340,9 @@ export function sanitizeSignals(raw: unknown): ReceiptSignals | null {
     ? [...new Set(r.phones.filter((p): p is string => typeof p === 'string' && /^0\d{9,10}$/.test(p)))].slice(0, 3)
     : [];
   const text = typeof r.text === 'string' ? r.text.slice(0, 400) : '';
-  return { headerHash: hash(r.headerHash), wholeHash: hash(r.wholeHash), headerHue: hue, phones, text };
+  // 512バイトをbase64にしたもの（684文字、末尾は = 1つ）
+  const embedding = typeof r.embedding === 'string' && /^[A-Za-z0-9+/]{683}=$/.test(r.embedding) ? r.embedding : null;
+  return { embedding, headerHash: hash(r.headerHash), wholeHash: hash(r.wholeHash), headerHue: hue, phones, text };
 }
 
 /** ドライブの「店舗パターン.json」を読む。壊れていたら空から始める */
