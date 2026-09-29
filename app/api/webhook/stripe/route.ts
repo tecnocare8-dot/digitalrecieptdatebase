@@ -40,19 +40,24 @@ export async function POST(request: NextRequest) {
     const expiresAt = new Date();
     expiresAt.setFullYear(expiresAt.getFullYear() + 1);
 
-    await prisma.userSettings.upsert({
-      where: { id: 1 },
-      update: {
-        isPro: true,
-        proExpiresAt: expiresAt,
-      },
-      create: {
-        id: 1,
-        isPro: true,
-        proExpiresAt: expiresAt,
-      },
-    });
+    try {
+      await prisma.userSettings.upsert({
+        where: { id: 1 },
+        update: {
+          isPro: true,
+          proExpiresAt: expiresAt,
+        },
+        create: {
+          id: 1,
+          isPro: true,
+          proExpiresAt: expiresAt,
+        },
+      });
+    } catch (dbErr) {
+      console.error('Failed to update DB in Stripe webhook:', dbErr);
+    }
   }
+
 
   return NextResponse.json({ received: true });
 }
