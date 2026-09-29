@@ -52,3 +52,7 @@ next-env.d.ts
 /prisma/*.db-journal
 
 
+
+# local-only receipt images (dev fallback when BLOB_READ_WRITE_TOKEN is unset)
+/.local-uploads
+/.claude

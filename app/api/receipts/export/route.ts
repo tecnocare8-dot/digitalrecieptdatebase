@@ -1,44 +1,30 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { NextRequest, NextResponse } from 'next/server';
+import { listUserReceipts } from '@/lib/receipts';
+import { requireUserId, UnauthorizedError, unauthorizedResponse } from '@/lib/auth';
 
-export async function GET() {
+export const dynamic = 'force-dynamic';
+
+export async function GET(request: NextRequest) {
     try {
-        const receipts = await prisma.receipt.findMany({
-            orderBy: [
-                { date: 'desc' },
-                { id: 'desc' }
-            ],
-        });
-
-        // Deduplicate
-        const uniqueReceipts = [];
-        const seen = new Set();
-
-        for (const r of receipts) {
-            const dateStr = r.date ? r.date.toISOString().split('T')[0] : 'null';
-            const key = `${dateStr}|${r.totalAmount}|${r.invoiceNumber}|${r.companyName}`;
-
-            if (!seen.has(key)) {
-                seen.add(key);
-                uniqueReceipts.push(r);
-            }
-        }
+        const userId = await requireUserId();
+        const receipts = await listUserReceipts(userId);
+        const origin = request.nextUrl.origin;
 
         // CSV Header
-        const header = ['ID', '日付', '会社名', '登録番号', '金額', '支払い方法', '画像パス'];
-        const rows = uniqueReceipts.map(r => [
+        const header = ['ID', '日付', '会社名', '登録番号', '金額', '支払い方法', '画像URL'];
+        const rows = receipts.map(r => [
             r.id,
             r.date ? r.date.toISOString().split('T')[0] : '',
             r.companyName || '',
             r.invoiceNumber || '',
             r.totalAmount || '',
             r.paymentMethod || '現金',
-            r.imagePath
+            `${origin}${r.imageUrl}`
         ]);
 
         // Generate CSV String
         // Add BOM for Excel compatibility
-        const bom = '\uFEFF';
+        const bom = '﻿';
         const csvContent = bom + [
             header.join(','),
             ...rows.map(row => row.map(field => {
@@ -58,6 +44,7 @@ export async function GET() {
             },
         });
     } catch (error) {
+        if (error instanceof UnauthorizedError) return unauthorizedResponse();
         console.error('Error exporting CSV:', error);
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }

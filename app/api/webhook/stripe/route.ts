@@ -1,63 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
 import Stripe from 'stripe';
+import { getStripe, grantProForSession } from '@/lib/stripe';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
-  const stripeKey = process.env.STRIPE_SECRET_KEY;
-  if (!stripeKey) {
-    return NextResponse.json({ error: 'Stripe secret key not configured' }, { status: 500 });
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    // 署名を確認できない通知は受け付けない（以前は署名なしJSONを受け入れていたため、偽の通知でProにできた）
+    console.error('STRIPE_WEBHOOK_SECRET is not set; rejecting webhook.');
+    return NextResponse.json({ error: 'Webhook not configured' }, { status: 500 });
   }
 
-  const stripe = new Stripe(stripeKey, {
-    apiVersion: '2025-02-24.acacia' as any,
-  });
+  const signature = request.headers.get('stripe-signature');
+  if (!signature) {
+    return NextResponse.json({ error: 'Missing signature' }, { status: 400 });
+  }
 
   const body = await request.text();
-  const signature = request.headers.get('stripe-signature');
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const stripe = getStripe();
 
   let event: Stripe.Event;
-
   try {
-    if (webhookSecret && signature) {
-      event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
-    } else {
-      // Fallback if signature is not strictly enforced in dev/testing
-      event = JSON.parse(body) as Stripe.Event;
-    }
-  } catch (err: any) {
-    console.error('Webhook signature verification failed:', err.message);
-    return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
+    event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err);
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }
 
-  if (event.type === 'checkout.session.completed') {
+  if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
     const session = event.data.object as Stripe.Checkout.Session;
-    console.log('Payment completed for session:', session.id);
-
-    // Set Pro status and expiration (1 year from now)
-    const expiresAt = new Date();
-    expiresAt.setFullYear(expiresAt.getFullYear() + 1);
-
     try {
-      await prisma.userSettings.upsert({
-        where: { id: 1 },
-        update: {
-          isPro: true,
-          proExpiresAt: expiresAt,
-        },
-        create: {
-          id: 1,
-          isPro: true,
-          proExpiresAt: expiresAt,
-        },
-      });
-    } catch (dbErr) {
-      console.error('Failed to update DB in Stripe webhook:', dbErr);
+      const result = await grantProForSession(session);
+      console.log(`Stripe ${event.type} ${session.id}: ${result}`);
+    } catch (err) {
+      // 500を返すとStripeが自動で再送してくれる
+      console.error('Failed to grant Pro in Stripe webhook:', err);
+      return NextResponse.json({ error: 'Failed to process' }, { status: 500 });
     }
   }
-
 
   return NextResponse.json({ received: true });
 }

@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { writeFile } from 'fs/promises';
-import path from 'path';
-import fs from 'fs';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { getSubscriptionStatus } from '@/lib/settings';
+import { requireUserId, UnauthorizedError, unauthorizedResponse } from '@/lib/auth';
+import { saveImage } from '@/lib/storage';
+
+export const dynamic = 'force-dynamic';
+
+// Vercel の関数はリクエスト本文が4.5MBまで。画面側で縮小してから送るが、念のためここでも弾く
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
     try {
-        const subStatus = await getSubscriptionStatus();
+        const userId = await requireUserId();
+
+        const subStatus = await getSubscriptionStatus(userId);
         if (!subStatus.canAddReceipt) {
             return NextResponse.json(
                 {
@@ -22,7 +28,7 @@ export async function POST(request: NextRequest) {
 
         const formData = await request.formData();
 
-        const file = formData.get('image') as File;
+        const file = formData.get('image') as File | null;
         const dateStr = formData.get('date') as string;
         const invoiceNumber = formData.get('invoiceNumber') as string;
         const companyName = formData.get('companyName') as string;
@@ -32,6 +38,12 @@ export async function POST(request: NextRequest) {
         if (!file) {
             return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
         }
+        if (!file.type.startsWith('image/')) {
+            return NextResponse.json({ error: '画像ファイルを選択してください。' }, { status: 400 });
+        }
+        if (file.size > MAX_IMAGE_BYTES) {
+            return NextResponse.json({ error: '画像が大きすぎます（4MBまで）。' }, { status: 413 });
+        }
 
         const buffer = Buffer.from(await file.arrayBuffer());
 
@@ -40,68 +52,26 @@ export async function POST(request: NextRequest) {
 
         // Duplicate check disabled - same receipt can be saved multiple times
         // (e.g., toll road receipts on the same day)
-        // const existing = await prisma.receipt.findUnique({
-        //     where: { imageHash: hash },
-        // });
-        // if (existing) {
-        //     return NextResponse.json({
-        //         error: 'Duplicate receipt',
-        //         code: 'DUPLICATE_RECEIPT',
-        //         existingId: existing.id
-        //     }, { status: 409 });
-        // }
 
-        // Format filename: YYYYMMDD_Company_Price.jpg
-        // Sanitize company name to be safe for filenames
-        const safeCompanyName = (companyName || 'Unknown').replace(/[^a-z0-9\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uff00-\uff9f\u4e00-\u9faf\u3400-\u4dbf]/gi, '_');
-        const price = totalAmountStr ? totalAmountStr : '0';
+        const imageKey = `receipts/${userId}/${randomUUID()}.jpg`;
+        await saveImage(imageKey, buffer, file.type);
 
-        let datePart = '00000000';
-        if (dateStr) {
-            try {
-                const d = new Date(dateStr);
-                const y = d.getFullYear();
-                const m = String(d.getMonth() + 1).padStart(2, '0');
-                const day = String(d.getDate()).padStart(2, '0');
-                datePart = `${y}${m}${day}`;
-            } catch (e) {
-                console.error('Date parse error', e);
-            }
-        }
-
-        let suffix = 'ca';
-        if (paymentMethod === 'クレジットカード') {
-            suffix = 'cr';
-        } else if (paymentMethod === '電子マネー') {
-            suffix = 'd';
-        }
-
-        const filename = `${datePart}_${safeCompanyName}_${price}_${suffix}.jpg`;
-        const uploadDir = path.join(process.cwd(), 'public/uploads');
-
-        // Ensure directory exists (redundant but safe)
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
-        }
-
-        const filePath = path.join(uploadDir, filename);
-        await writeFile(filePath, buffer);
-
-        // Save to DB
         const receipt = await prisma.receipt.create({
             data: {
+                userId,
                 date: dateStr ? new Date(dateStr) : null,
                 invoiceNumber: invoiceNumber || null,
                 companyName: companyName || null,
                 totalAmount: totalAmountStr ? parseInt(totalAmountStr, 10) : null,
                 paymentMethod: paymentMethod || '現金',
-                imagePath: `/uploads/${filename}`,
+                imageKey,
                 imageHash: hash,
             },
         });
 
         return NextResponse.json({ success: true, receipt });
     } catch (error) {
+        if (error instanceof UnauthorizedError) return unauthorizedResponse();
         console.error('Error saving receipt:', error);
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }

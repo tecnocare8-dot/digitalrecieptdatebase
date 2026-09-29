@@ -10,7 +10,7 @@ interface Receipt {
     companyName: string | null;
     totalAmount: number | null;
     paymentMethod: string | null;
-    imagePath: string;
+    imageUrl: string;
 }
 
 export default function HistoryPage() {
@@ -80,7 +80,7 @@ export default function HistoryPage() {
 
             if (res.ok) {
                 const updated = await res.json();
-                const updatedReceipts = receipts.map(r => r.id === updated.id ? updated : r);
+                const updatedReceipts = receipts.map(r => r.id === updated.id ? { ...r, ...updated } : r);
 
                 // Sort by date (newest first)
                 updatedReceipts.sort((a, b) => {
@@ -164,7 +164,7 @@ export default function HistoryPage() {
                                                 {receipt.invoiceNumber || '-'}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                <a href={receipt.imagePath} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                                                <a href={receipt.imageUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                                                     画像を見る
                                                 </a>
                                             </td>

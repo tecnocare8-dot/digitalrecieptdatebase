@@ -7,32 +7,49 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+// Googleログインした利用者。プラン状態は利用者ごとに持つ
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String?
+  // Proの有効期限。null=一度も購入していない、過去日時=期限切れ
+  proExpiresAt DateTime?
+  createdAt    DateTime  @default(now())
+  receipts     Receipt[]
+  payments     Payment[]
 }
 
 model Receipt {
-  id          Int      @id @default(autoincrement())
-  date        DateTime?
+  id            Int       @id @default(autoincrement())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date          DateTime?
   invoiceNumber String?
-  companyName String?
-  totalAmount Int?
+  companyName   String?
+  totalAmount   Int?
   paymentMethod String?
-  imagePath   String
-  imageHash   String?
-  createdAt   DateTime @default(now())
+  // Blobストレージ上のパス（非公開）。画像は /api/receipts/[id]/image から本人のみ取得できる
+  imageKey      String
+  imageHash     String?
+  createdAt     DateTime  @default(now())
+
+  @@index([userId, date])
+  @@index([userId, invoiceNumber])
 }
 
-model InvoiceIssuer {
-  invoiceNumber String   @id
-  legalName     String
-  updatedAt     DateTime @updatedAt
+// Stripe Checkout 1回ごとの記録。stripeSessionId の一意制約で、webhook と戻り画面の確認が
+// 重なっても期限延長が1回しか適用されないようにする
+model Payment {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stripeSessionId String   @unique
+  amount          Int
+  currency        String
+  createdAt       DateTime @default(now())
 }
-
-model UserSettings {
-  id           Int       @id @default(1)
-  isPro        Boolean   @default(false)
-  proExpiresAt DateTime?
-  updatedAt    DateTime  @updatedAt
-}
-

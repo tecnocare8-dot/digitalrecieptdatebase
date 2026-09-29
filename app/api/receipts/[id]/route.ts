@@ -1,54 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { unlink } from 'fs/promises';
-import path from 'path';
-import fs from 'fs';
+import { requireUserId, UnauthorizedError, unauthorizedResponse } from '@/lib/auth';
+import { deleteImage } from '@/lib/storage';
+
+export const dynamic = 'force-dynamic';
+
+/** 本人の領収書だけを返す。他人のIDを指定しても「存在しない」扱いにする */
+async function findOwnReceipt(userId: string, id: string) {
+    const receiptId = parseInt(id, 10);
+    if (isNaN(receiptId)) return null;
+    return prisma.receipt.findFirst({ where: { id: receiptId, userId } });
+}
 
 export async function DELETE(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const userId = await requireUserId();
         const { id } = await params;
-        const receiptId = parseInt(id, 10);
 
-        if (isNaN(receiptId)) {
-            return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
-        }
-
-        // Find receipt to get image path
-        const receipt = await prisma.receipt.findUnique({
-            where: { id: receiptId },
-        });
-
+        const receipt = await findOwnReceipt(userId, id);
         if (!receipt) {
             return NextResponse.json({ error: 'Receipt not found' }, { status: 404 });
         }
 
-        // Delete from DB
-        await prisma.receipt.delete({
-            where: { id: receiptId },
-        });
+        await prisma.receipt.delete({ where: { id: receipt.id } });
 
-        // Delete image file
-        if (receipt.imagePath) {
-            // imagePath is like "/uploads/filename.jpg"
-            // We need absolute path
-            const relativePath = receipt.imagePath.startsWith('/') ? receipt.imagePath.slice(1) : receipt.imagePath;
-            const absolutePath = path.join(process.cwd(), 'public', relativePath);
-
-            if (fs.existsSync(absolutePath)) {
-                try {
-                    await unlink(absolutePath);
-                } catch (e) {
-                    console.error('Failed to delete image file', e);
-                    // Continue even if file delete fails
-                }
-            }
+        try {
+            await deleteImage(receipt.imageKey);
+        } catch (e) {
+            // DBからは消えているので、画像の削除失敗は記録だけして続行する
+            console.error('Failed to delete image file', e);
         }
 
         return NextResponse.json({ success: true });
     } catch (error) {
+        if (error instanceof UnauthorizedError) return unauthorizedResponse();
         console.error('Error deleting receipt:', error);
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
@@ -59,8 +47,12 @@ export async function PUT(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const userId = await requireUserId();
         const { id } = await params;
-        const receiptId = parseInt(id, 10);
+
+        const receipt = await findOwnReceipt(userId, id);
+        if (!receipt) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
         const formData = await request.formData();
 
         const dateStr = formData.get('date') as string;
@@ -69,60 +61,21 @@ export async function PUT(
         const totalAmount = parseInt(formData.get('totalAmount') as string);
         const paymentMethod = formData.get('paymentMethod') as string;
 
-        const receipt = await prisma.receipt.findUnique({ where: { id: receiptId } });
-        if (!receipt) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-
-        let imagePath = receipt.imagePath;
-
-        // Rename logic
-        if (dateStr && paymentMethod) {
-            const ext = path.extname(receipt.imagePath);
-            const dateObj = new Date(dateStr);
-            const yyyy = dateObj.getFullYear();
-            const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-            const dd = String(dateObj.getDate()).padStart(2, '0');
-            const datePrefix = `${yyyy}${mm}${dd}`;
-
-            let suffix = '';
-            if (paymentMethod === '現金') suffix = '_ca';
-            else if (paymentMethod === 'クレジットカード') suffix = '_cr';
-            else if (paymentMethod === '電子マネー') suffix = '_d';
-
-            // Use current time for uniqueness
-            const now = new Date();
-            const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '');
-
-            const newFilename = `${datePrefix}_${timeStr}${suffix}${ext}`;
-            const newImagePath = `/uploads/${newFilename}`;
-
-            const oldAbsPath = path.join(process.cwd(), 'public', receipt.imagePath.replace(/^\//, ''));
-            const newAbsPath = path.join(process.cwd(), 'public', 'uploads', newFilename);
-
-            if (fs.existsSync(oldAbsPath)) {
-                try {
-                    await fs.promises.rename(oldAbsPath, newAbsPath);
-                    imagePath = newImagePath;
-                } catch (e) {
-                    console.error('Failed to rename file', e);
-                }
-            }
-        }
-
         const updated = await prisma.receipt.update({
-            where: { id: receiptId },
+            where: { id: receipt.id },
             data: {
-                date: new Date(dateStr),
+                date: dateStr ? new Date(dateStr) : null,
                 invoiceNumber,
                 companyName,
-                totalAmount,
+                totalAmount: isNaN(totalAmount) ? null : totalAmount,
                 paymentMethod,
-                imagePath
             }
         });
 
-        return NextResponse.json(updated);
-
+        const { imageKey: _imageKey, userId: _userId, ...rest } = updated;
+        return NextResponse.json(rest);
     } catch (e) {
+        if (e instanceof UnauthorizedError) return unauthorizedResponse();
         console.error('Error updating receipt:', e);
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }

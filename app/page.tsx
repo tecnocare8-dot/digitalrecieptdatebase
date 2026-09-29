@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import Link from 'next/link';
 import { performOCR, ParsedReceipt, cancelOCR } from '@/utils/ocr';
 import ImagePreview from '@/components/ImagePreview';
-import { rotateImage } from '@/utils/image-processing';
+import { rotateImage, compressForUpload } from '@/utils/image-processing';
 
 type FormData = {
   date: string;
@@ -225,7 +225,7 @@ export default function Home() {
 
     setStatusMessage('保存中...');
     const formData = new FormData();
-    formData.append('image', image);
+    formData.append('image', await compressForUpload(image));
     formData.append('date', data.date);
 
     let invoiceNumber = data.invoiceNumber.replace(/[- ]/g, '');
@@ -262,9 +262,14 @@ export default function Home() {
         const errData = await res.json();
         alert(`【保存制限】\n${errData.error}`);
         setStatusMessage(errData.error);
+      } else if (res.status === 401) {
+        setStatusMessage('ログインの有効期限が切れました。ページを再読み込みして、もう一度ログインしてください。');
+        alert('ログインの有効期限が切れました。ページを再読み込みして、もう一度ログインしてください。');
       } else {
-        setStatusMessage('保存エラーが発生しました。');
-        alert('保存エラー');
+        const errData = await res.json().catch(() => null);
+        const msg = errData?.error || '保存エラーが発生しました。';
+        setStatusMessage(msg);
+        alert(msg);
       }
     } catch (e) {
       console.error(e);
