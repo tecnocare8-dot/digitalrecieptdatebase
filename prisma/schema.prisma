@@ -1,0 +1,37 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Receipt {
+  id          Int      @id @default(autoincrement())
+  date        DateTime?
+  invoiceNumber String?
+  companyName String?
+  totalAmount Int?
+  paymentMethod String?
+  imagePath   String
+  imageHash   String?
+  createdAt   DateTime @default(now())
+}
+
+model InvoiceIssuer {
+  invoiceNumber String   @id
+  legalName     String
+  updatedAt     DateTime @updatedAt
+}
+
+model UserSettings {
+  id           Int       @id @default(1)
+  isPro        Boolean   @default(false)
+  proExpiresAt DateTime?
+  updatedAt    DateTime  @updatedAt
+}
+
