@@ -5,6 +5,7 @@ import { requireUserId } from '@/lib/auth';
 import { driveForUser } from '@/lib/drive';
 import { errorResponse } from '@/lib/api-errors';
 import { toClientReceipt } from '@/lib/receipts';
+import { sanitizeSignals } from '@/lib/stores';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,14 @@ export async function POST(request: NextRequest) {
         const companyName = formData.get('companyName') as string;
         const totalAmountStr = formData.get('totalAmount') as string;
         const paymentMethod = formData.get('paymentMethod') as string;
+        const category = formData.get('category') as string | null;
+        // お店の学習に使う手がかり（見た目の指紋・電話番号など）。画面側で作ってJSONで送る
+        let signals = null;
+        try {
+            signals = sanitizeSignals(JSON.parse((formData.get('signals') as string) || 'null'));
+        } catch {
+            signals = null;
+        }
 
         if (!file) {
             return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
@@ -50,6 +59,7 @@ export async function POST(request: NextRequest) {
                 companyName: companyName || null,
                 totalAmount: isNaN(totalAmount) ? null : totalAmount,
                 paymentMethod: paymentMethod || '現金',
+                category: category || null,
                 createdAt: new Date().toISOString(),
             },
             buffer,
@@ -57,7 +67,8 @@ export async function POST(request: NextRequest) {
                 const permission = addPermission(user.proExpiresAt, count);
                 if (!permission.canAdd) denied = permission.reason;
                 return permission.canAdd;
-            }
+            },
+            signals
         );
 
         if (!record) {

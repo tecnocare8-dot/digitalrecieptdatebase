@@ -7,6 +7,9 @@ import { performOCR, ParsedReceipt, cancelOCR } from '@/utils/ocr';
 import ImagePreview from '@/components/ImagePreview';
 import { rotateImage, compressForUpload } from '@/utils/image-processing';
 import DriveFolderSetup, { type DriveStatus } from '@/components/DriveFolderSetup';
+import { computeSignals, preloadModel } from '@/utils/fingerprint';
+import { RECEIPT_CATEGORIES } from '@/lib/categories';
+import type { ReceiptSignals } from '@/lib/stores';
 
 type FormData = {
   date: string;
@@ -14,7 +17,20 @@ type FormData = {
   companyName: string;
   totalAmount: number;
   paymentMethod: string;
+  category: string;
 };
+
+/** 学習済みのお店（判別結果・よく使うお店） */
+interface StoreSuggestion {
+  companyName: string | null;
+  invoiceNumber: string | null;
+  paymentMethod: string | null;
+  category: string | null;
+  count: number;
+  score: number;
+  reasons: string[];
+  autoFill?: boolean;
+}
 
 interface SubscriptionSettings {
   isPro: boolean;
@@ -35,6 +51,11 @@ export default function Home() {
   const [ocrDebugText, setOcrDebugText] = useState('');
   const [subSettings, setSubSettings] = useState<SubscriptionSettings | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  // お店の学習: 撮影した画像の手がかり、判別結果、よく使うお店
+  const [signals, setSignals] = useState<ReceiptSignals | null>(null);
+  const [storeMatches, setStoreMatches] = useState<StoreSuggestion[]>([]);
+  const [appliedStore, setAppliedStore] = useState<StoreSuggestion | null>(null);
+  const [frequentStores, setFrequentStores] = useState<StoreSuggestion[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -51,7 +72,55 @@ export default function Home() {
 
   useEffect(() => {
     fetchSubSettings();
+    fetchFrequentStores();
   }, []);
+
+  const fetchFrequentStores = async () => {
+    try {
+      const res = await fetch('/api/stores');
+      if (res.ok) setFrequentStores(await res.json());
+    } catch (e) {
+      console.error('Failed to fetch frequent stores', e);
+    }
+  };
+
+  /** 学習済みのお店の情報を入力欄に入れる（金額と日付はレシートごとに違うので触らない） */
+  const applyStore = (s: StoreSuggestion) => {
+    if (s.companyName) setValue('companyName', s.companyName);
+    if (s.invoiceNumber) setValue('invoiceNumber', s.invoiceNumber.replace(/^T/, ''));
+    if (s.paymentMethod) setValue('paymentMethod', s.paymentMethod);
+    if (s.category) setValue('category', s.category);
+    setAppliedStore(s);
+  };
+
+  const clearStoreState = () => {
+    setSignals(null);
+    setStoreMatches([]);
+    setAppliedStore(null);
+  };
+
+  /** 撮影したレシートの見た目・電話番号・読めた文字から、学習済みのお店を判別する */
+  const identifyStore = async (file: File, ocrText: string, ocrInvoiceNumber: string | null) => {
+    try {
+      const sig = await computeSignals(file, ocrText);
+      setSignals(sig);
+      const res = await fetch('/api/stores/match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signals: sig, invoiceNumber: ocrInvoiceNumber }),
+      });
+      if (!res.ok) return null;
+      const { candidates } = await res.json() as { candidates: StoreSuggestion[] };
+      setStoreMatches(candidates);
+      const best = candidates.find((c) => c.autoFill) ?? null;
+      if (best) applyStore(best);
+      return best;
+    } catch (e) {
+      // 判別に失敗しても、通常どおり手入力で保存できる
+      console.error('Store identification failed', e);
+      return null;
+    }
+  };
 
   const fetchSubSettings = async () => {
     try {
@@ -146,6 +215,10 @@ export default function Home() {
     setIsScanning(true);
     setStatusMessage('文字を読み取っています... (Tesseract.js)');
     setOcrDebugText('');
+    clearStoreState();
+    // 画像認識モデル（初回のみ約14MB）の読み込みを、文字の読み取りと並行して始める
+    void preloadModel();
+    setValue('category', '');
 
     try {
       const result = await performOCR(file);
@@ -179,7 +252,16 @@ export default function Home() {
       if (result.paymentMethod) setValue('paymentMethod', result.paymentMethod);
       else setValue('paymentMethod', '現金');
 
-      setStatusMessage('読み取り完了。内容を確認・修正してください。');
+      // 文字だけでなく、ロゴ・デザイン・電話番号からも過去に学習したお店を探す
+      setStatusMessage('お店を判別しています...');
+      const ocrInvoice = result.invoiceNumber ? 'T' + result.invoiceNumber.replace(/[- ]/g, '').replace(/^T/, '') : null;
+      const matched = await identifyStore(file, result.text, ocrInvoice);
+      // このレシートの文字でカード・電子マネーと読めた場合は、お店のいつもの支払い方法より優先する
+      if (matched && result.paymentMethod && result.paymentMethod !== '現金') setValue('paymentMethod', result.paymentMethod);
+
+      setStatusMessage(matched
+        ? `「${matched.companyName ?? matched.invoiceNumber}」と判定して入力しました（${matched.reasons.join('・')}）。内容を確認してください。`
+        : '読み取り完了。内容を確認・修正してください。');
     } catch (err) {
       console.error(err);
       setStatusMessage('読み取りに失敗しました。手動で入力してください。');
@@ -239,6 +321,9 @@ export default function Home() {
     formData.append('companyName', data.companyName);
     formData.append('totalAmount', data.totalAmount.toString());
     formData.append('paymentMethod', data.paymentMethod);
+    formData.append('category', data.category || '');
+    // 保存と同時に、このお店の見た目・電話番号を学習させる
+    if (signals) formData.append('signals', JSON.stringify(signals));
 
     try {
       const res = await fetch('/api/receipts', {
@@ -249,6 +334,8 @@ export default function Home() {
       if (res.ok) {
         setStatusMessage('保存しました！');
         fetchSubSettings();
+        fetchFrequentStores();
+        clearStoreState();
         if (queue.length > 0) {
           handleNext();
         } else {
@@ -370,6 +457,54 @@ export default function Home() {
           </label>
         </div>
 
+        {/* お店の判別結果。自動入力したお店と、ほかの候補への切り替え */}
+        {image && !isScanning && (appliedStore || storeMatches.length > 0) && (
+          <div className="mb-4 p-3 rounded-lg border border-emerald-200 bg-emerald-50 space-y-2">
+            {appliedStore ? (
+              <p className="text-sm text-emerald-900">
+                🏪 <b>{appliedStore.companyName ?? appliedStore.invoiceNumber}</b> として入力しました
+                <span className="text-xs text-emerald-700">（{appliedStore.reasons.join('・')}{appliedStore.count ? `／これまで${appliedStore.count}回` : ''}）</span>
+              </p>
+            ) : (
+              <p className="text-sm text-emerald-900">🏪 このお店かもしれません。当てはまるものを押すと入力します。</p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {storeMatches
+                .filter((s) => s !== appliedStore)
+                .map((s, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => applyStore(s)}
+                    className="text-xs px-3 py-1.5 rounded-full bg-white border border-emerald-300 text-emerald-900 hover:bg-emerald-100"
+                  >
+                    {s.companyName ?? s.invoiceNumber}
+                  </button>
+                ))}
+            </div>
+          </div>
+        )}
+
+        {/* よく使うお店。同じ情報を何度も入れずに済むよう、ワンタップで入力 */}
+        {image && !isScanning && frequentStores.length > 0 && (
+          <div className="mb-4">
+            <p className="text-xs text-gray-500 mb-1">よく使うお店（押すと店名・登録番号・支払い方法・分類が入ります）</p>
+            <div className="flex flex-wrap gap-2">
+              {frequentStores.map((s, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => applyStore({ ...s, reasons: ['よく使うお店から選択'] })}
+                  className="text-xs px-3 py-1.5 rounded-full bg-gray-100 border border-gray-300 text-gray-800 hover:bg-gray-200"
+                >
+                  {s.companyName ?? s.invoiceNumber}
+                  <span className="ml-1 text-gray-500">{s.count}回</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Preview */}
         {previewUrl && (
           <ImagePreview src={previewUrl} onRotate={handleRotate} />
@@ -463,6 +598,21 @@ export default function Home() {
               <option value="電子マネー">電子マネー</option>
               <option value="その他">その他</option>
             </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">分類（勘定科目）</label>
+            <select
+              disabled={isScanning}
+              {...register('category')}
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 border disabled:bg-gray-100 text-gray-900 bg-white"
+            >
+              <option value="">未分類</option>
+              {RECEIPT_CATEGORIES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-500">お店ごとに覚えて、次回から自動で入ります。</p>
           </div>
 
           <div className="flex gap-2">

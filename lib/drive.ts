@@ -3,6 +3,10 @@ import fs from 'fs/promises';
 import path from 'path';
 import { prisma } from './prisma';
 import { decryptSecret } from './crypto';
+import {
+  emptyPatterns, forget, frequentStores, learn, matchStores, parsePatterns, sanitizeSignals,
+  type LearnInput, type PatternsFile, type ReceiptSignals,
+} from './stores';
 
 // 領収書は利用者本人の Google ドライブ（このアプリが作ったフォルダ）に保存する。
 //   フォルダ/
@@ -15,6 +19,7 @@ export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 const APP_TAG = 'digital-receipt';
 export const LEDGER_NAME = '領収書一覧.csv';
+export const PATTERNS_NAME = '店舗パターン.json';
 
 export interface ReceiptMeta {
   date: string | null; // YYYY-MM-DD
@@ -22,6 +27,7 @@ export interface ReceiptMeta {
   companyName: string | null;
   totalAmount: number | null;
   paymentMethod: string | null;
+  category: string | null; // 分類（勘定科目）。お店ごとに学習して自動入力する
   createdAt: string; // ISO
 }
 
@@ -45,7 +51,7 @@ export function fileUrl(fileId: string) {
 // ---------------------------------------------------------------------------
 // CSV（Excelで文字化けしないよう BOM 付き UTF-8）
 
-const CSV_HEADER = ['ID', '日付', '会社名', '登録番号', '金額', '支払い方法', '画像ファイル名', '画像リンク', '登録日時'];
+const CSV_HEADER = ['ID', '日付', '会社名', '登録番号', '金額', '支払い方法', '分類', '画像ファイル名', '画像リンク', '登録日時'];
 
 function csvField(v: string | number | null) {
   const s = v == null ? '' : String(v);
@@ -54,7 +60,7 @@ function csvField(v: string | number | null) {
 
 export function toCsv(records: ReceiptRecord[]): string {
   const lines = [CSV_HEADER, ...records.map((r) => [
-    r.id, r.date, r.companyName, r.invoiceNumber, r.totalAmount, r.paymentMethod, r.imageName, fileUrl(r.id), r.createdAt,
+    r.id, r.date, r.companyName, r.invoiceNumber, r.totalAmount, r.paymentMethod, r.category, r.imageName, fileUrl(r.id), r.createdAt,
   ])];
   return '﻿' + lines.map((l) => l.map(csvField).join(',')).join('\r\n') + '\r\n';
 }
@@ -106,6 +112,7 @@ export function fromCsv(text: string): ReceiptRecord[] {
       invoiceNumber: get(r, '登録番号'),
       totalAmount: n === null || isNaN(n) ? null : n,
       paymentMethod: get(r, '支払い方法'),
+      category: get(r, '分類'),
       imageName: get(r, '画像ファイル名') ?? '',
       createdAt: get(r, '登録日時') ?? '',
     }];
@@ -347,17 +354,35 @@ function fakeBackend(userId: string, encryptedRefreshToken: string | null): Back
 
 // ---------------------------------------------------------------------------
 
-function describe(meta: ReceiptMeta) {
-  return JSON.stringify({ app: APP_TAG, receipt: meta });
+// 画像の説明欄には、CSVと同じ内容に加えて、お店の学習に使う手がかり（見た目の指紋など）も持たせる
+function describe(meta: ReceiptMeta, signals: ReceiptSignals | null) {
+  return JSON.stringify({ app: APP_TAG, receipt: meta, signals });
 }
 
-function metaFromDescription(f: RawFile): ReceiptMeta | null {
+function parseDescription(f: RawFile): { meta: ReceiptMeta; signals: ReceiptSignals | null } | null {
   try {
     const m = JSON.parse(f.description ?? '');
-    return m?.app === APP_TAG ? m.receipt : null;
+    if (m?.app !== APP_TAG || !m.receipt) return null;
+    return { meta: { category: null, ...m.receipt }, signals: sanitizeSignals(m.signals) };
   } catch {
     return null;
   }
+}
+
+function metaFromDescription(f: RawFile): ReceiptMeta | null {
+  return parseDescription(f)?.meta ?? null;
+}
+
+function learnInput(record: ReceiptRecord, signals: ReceiptSignals | null): LearnInput {
+  return {
+    receiptId: record.id,
+    companyName: record.companyName,
+    invoiceNumber: record.invoiceNumber,
+    paymentMethod: record.paymentMethod,
+    category: record.category,
+    usedAt: record.createdAt,
+    signals,
+  };
 }
 
 /** ドライブ上の画像ファイル名。ドライブを直接開いたときに中身が分かる名前にする */
@@ -418,6 +443,41 @@ export async function driveForUser(userId: string) {
     }, { timeout: 60_000, maxWait: 60_000 });
   }
 
+  /**
+   * お店の学習ファイル（店舗パターン.json）を読む。
+   * 無い・壊れている場合は、ドライブに残っている領収書（CSVの記録と画像の説明欄の手がかり）から学習し直す
+   */
+  async function loadPatterns(folderId: string): Promise<PatternsFile> {
+    const [file] = await backend.listByKind(folderId, 'patterns');
+    if (file) {
+      const data = await backend.download(file.id);
+      const parsed = parsePatterns(data ? data.toString('utf8') : null);
+      if (parsed) return parsed;
+    }
+    const { records } = await loadLedger(folderId);
+    const images = await backend.listByKind(folderId, 'receipt');
+    const signalsById = new Map(images.map((f) => [f.id, parseDescription(f)?.signals ?? null]));
+    return [...records]
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .reduce((p, r) => learn(p, learnInput(r, signalsById.get(r.id) ?? null)), emptyPatterns());
+  }
+
+  async function savePatterns(folderId: string, patterns: PatternsFile) {
+    const data = Buffer.from(JSON.stringify(patterns, null, 1), 'utf8');
+    const [file] = await backend.listByKind(folderId, 'patterns');
+    if (file) await backend.updateMedia(file.id, 'application/json', data);
+    else await backend.create(folderId, PATTERNS_NAME, 'application/json', '', 'patterns', data);
+  }
+
+  /** 学習の更新。失敗しても領収書の保存自体は成功させる（記録が正、学習は作り直せる） */
+  async function updatePatterns(folderId: string, fn: (p: PatternsFile) => PatternsFile) {
+    try {
+      await savePatterns(folderId, fn(await loadPatterns(folderId)));
+    } catch (e) {
+      console.error('Failed to update store patterns:', e);
+    }
+  }
+
   async function findOwn(fileId: string) {
     const folderId = await requireFolder();
     const { id: ledgerId, records } = await loadLedger(folderId);
@@ -470,42 +530,60 @@ export async function driveForUser(userId: string) {
      * 画像を保存して一覧CSVに1行追加する。
      * canAdd は一覧を読んだ後・書く前に呼ぶ（5件制限の判定をロックの中で行うため）
      */
-    async addReceipt(meta: ReceiptMeta, image: Buffer, canAdd: (count: number) => boolean): Promise<ReceiptRecord | null> {
+    async addReceipt(meta: ReceiptMeta, image: Buffer, canAdd: (count: number) => boolean, signals: ReceiptSignals | null = null): Promise<ReceiptRecord | null> {
       const folderId = await requireFolder();
       return withLedgerLock(async () => {
         const { id: ledgerId, records } = await loadLedger(folderId);
         if (!canAdd(records.length)) return null;
         const name = imageName(meta);
-        const id = await backend.create(folderId, name, 'image/jpeg', describe(meta), 'receipt', image);
+        const id = await backend.create(folderId, name, 'image/jpeg', describe(meta, signals), 'receipt', image);
         const record = { ...meta, id, imageName: name };
         await saveLedger(ledgerId, [...records, record]);
+        await updatePatterns(folderId, (p) => learn(p, learnInput(record, signals)));
         return record;
       });
     },
 
     async updateReceipt(fileId: string, patch: Omit<ReceiptMeta, 'createdAt'>): Promise<ReceiptRecord | null> {
-      await requireFolder();
+      const folderId = await requireFolder();
       return withLedgerLock(async () => {
         const { ledgerId, records, record } = await findOwn(fileId);
         if (!record) return null;
         const updated = { ...record, ...patch };
         const { id: _id, imageName: _name, ...meta } = updated;
         updated.imageName = imageName(meta);
-        await backend.updateMeta(fileId, updated.imageName, describe(meta));
+        const image = await backend.getFile(fileId);
+        const signals = image ? parseDescription(image)?.signals ?? null : null;
+        await backend.updateMeta(fileId, updated.imageName, describe(meta, signals));
         await saveLedger(ledgerId, records.map((r) => (r.id === fileId ? updated : r)));
+        // 店名などを直した場合は、古いお店から学習を外して、正しいお店として学び直す
+        await updatePatterns(folderId, (p) => learn(forget(p, fileId, record), learnInput(updated, signals)));
         return updated;
       });
     },
 
     async trashReceipt(fileId: string): Promise<boolean> {
-      await requireFolder();
+      const folderId = await requireFolder();
       return withLedgerLock(async () => {
         const { ledgerId, records, record } = await findOwn(fileId);
         if (!record) return false;
         await saveLedger(ledgerId, records.filter((r) => r.id !== fileId));
         await backend.trash(fileId);
+        await updatePatterns(folderId, (p) => forget(p, fileId, record));
         return true;
       });
+    },
+
+    /** 新しいレシートの手がかりから、学習済みのお店を一致度の高い順に返す */
+    async matchStores(signals: ReceiptSignals, ocrInvoiceNumber: string | null) {
+      const folderId = await requireFolder();
+      return matchStores(await loadPatterns(folderId), signals, ocrInvoiceNumber);
+    },
+
+    /** よく使うお店 */
+    async frequentStores() {
+      const folderId = await requireFolder();
+      return frequentStores(await loadPatterns(folderId));
     },
 
     /** 一覧CSVに載っている本人の領収書の画像だけを返す */

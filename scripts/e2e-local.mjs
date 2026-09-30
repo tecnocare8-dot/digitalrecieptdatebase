@@ -57,11 +57,11 @@ function fakeFiles(userId) {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir).filter((n) => n.endsWith('.json')).map((n) => JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')));
 }
-function ledgerOf(userId) {
-  return fakeFiles(userId).find((f) => f.appProperties?.kind === 'ledger' && !f.trashed);
+function ledgerOf(userId, folderId) {
+  return fakeFiles(userId).find((f) => f.appProperties?.kind === 'ledger' && !f.trashed && (!folderId || f.parents?.includes(folderId)));
 }
-function ledgerText(userId) {
-  const l = ledgerOf(userId);
+function ledgerText(userId, folderId) {
+  const l = ledgerOf(userId, folderId);
   return l ? fs.readFileSync(path.join(FAKE, userId, `${l.id}.bin`), 'utf8') : null;
 }
 function markTrashed(userId, id) {
@@ -143,7 +143,7 @@ async function main() {
   check('もう一度押しても作り直さず同じフォルダ', body.created === false && body.folder.id === folderA.id);
   s = await getJson('/api/settings', ca);
   check('設定にフォルダとCSVのリンクが出る', s.drive.folderExists && s.drive.folder.url === folderA.url && /^https:\/\/drive\.google\.com\/file\/d\//.test(s.drive.ledgerUrl ?? ''), JSON.stringify(s.drive));
-  check('作成直後に空の一覧CSVがドライブにある', (ledgerText(A.id) ?? '').startsWith('﻿ID,日付,会社名,登録番号,金額,支払い方法,画像ファイル名,画像リンク,登録日時'));
+  check('作成直後に空の一覧CSVがドライブにある', (ledgerText(A.id) ?? '').startsWith('﻿ID,日付,会社名,登録番号,金額,支払い方法,分類,画像ファイル名,画像リンク,登録日時'));
   const emptyName = await createFolder(cb, '   ');
   const bFolder = (await emptyName.json()).folder;
   check('名前が空なら既定の名前で作る', bFolder.name === '領収書（デジタル領収書管理）', bFolder.name);
@@ -257,7 +257,58 @@ async function main() {
   r = await createFolder(cb, '新しいフォルダ');
   body = await r.json();
   check('フォルダを作り直せる', body.created === true && body.folder.id !== bFolder.id);
+  const bFolderNow = body.folder.id;
   check('作り直した後は保存できる', (await addReceipt(cb, 2)).status === 200);
+
+  console.log('11. お店の学習（ロゴ・デザイン・分類）');
+  // お店ごとの基準の見た目＋撮影ごとの揺れ、で画像認識の特徴（512バイト）を作る
+  const baseVec = (seed) => { let s = seed; return Array.from({ length: 512 }, () => { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648 - 0.5; }); };
+  const embOf = (b, seed) => { let s = seed; const v = b.map((x) => { s = (s * 69069 + 1) % 4294967296; return x + (s / 4294967296 - 0.5) * 0.6; }); const m = Math.max(...v.map(Math.abs)); return Buffer.from(Int8Array.from(v, (x) => Math.round((x / m) * 127)).buffer).toString('base64'); };
+  const CAFE = baseVec(1), BAKERY = baseVec(2);
+  const sigOf = (embedding) => ({ embedding, headerHash: null, wholeHash: null, headerHue: null, phones: [], text: '' });
+  async function addLearned(cookie, company, category, payment, signals) {
+    const fd = new FormData();
+    fd.append('image', new Blob([JPEG], { type: 'image/jpeg' }), 'r.jpg');
+    fd.append('date', '2026-09-20');
+    fd.append('invoiceNumber', '');
+    fd.append('companyName', company);
+    fd.append('totalAmount', '800');
+    fd.append('paymentMethod', payment);
+    fd.append('category', category);
+    if (signals) fd.append('signals', JSON.stringify(signals));
+    const res = await fetch(`${BASE}/api/receipts`, { method: 'POST', body: fd, headers: { cookie } });
+    return { status: res.status, body: await res.json() };
+  }
+  const cafe1 = await addLearned(cb, '喫茶ミドリ', '会議費', '電子マネー', sigOf(embOf(CAFE, 11)));
+  const cafe2 = await addLearned(cb, '喫茶ミドリ', '会議費', '電子マネー', sigOf(embOf(CAFE, 12)));
+  await addLearned(cb, 'パン工房ムギ', '福利厚生費', '現金', sigOf(embOf(BAKERY, 21)));
+  await addLearned(cb, 'パン工房ムギ', '福利厚生費', '現金', sigOf(embOf(BAKERY, 22)));
+  check('手がかり付きで保存 → 200', cafe1.status === 200 && cafe2.status === 200, cafe1.status);
+  check('保存した領収書に分類が入る', cafe1.body.receipt.category === '会議費');
+  check('ドライブのCSVに分類の列と値がある', /ID,日付,会社名,登録番号,金額,支払い方法,分類,/.test(ledgerText(B.id, bFolderNow)) && ledgerText(B.id, bFolderNow).includes('会議費'));
+  const patternsFile = fakeFiles(B.id).find((f) => f.appProperties?.kind === 'patterns' && !f.trashed && f.parents?.includes(bFolderNow));
+  check('ドライブに店舗パターン.jsonができる', patternsFile?.name === '店舗パターン.json');
+  const matchRes = await fetch(`${BASE}/api/stores/match`, { method: 'POST', headers: { cookie: cb, 'content-type': 'application/json' }, body: JSON.stringify({ signals: sigOf(embOf(CAFE, 99)) }) });
+  const match = await matchRes.json();
+  const topMatch = match.candidates?.[0];
+  check('文字なしでも、ロゴ・デザインから「喫茶ミドリ」と判別して自動入力', topMatch?.companyName === '喫茶ミドリ' && topMatch.autoFill === true, JSON.stringify(match));
+  check('判別したお店のいつもの支払い方法・分類が付く', topMatch?.paymentMethod === '電子マネー' && topMatch?.category === '会議費');
+  check('他人（A）の学習では判別されない', (await (await fetch(`${BASE}/api/stores/match`, { method: 'POST', headers: { cookie: ca, 'content-type': 'application/json' }, body: JSON.stringify({ signals: sigOf(embOf(CAFE, 99)) }) })).json()).candidates.every((c) => c.companyName !== '喫茶ミドリ'));
+  const freq = await getJson('/api/stores', cb);
+  check('よく使うお店に出る（2回）', freq.some((s) => s.companyName === '喫茶ミドリ' && s.count === 2), JSON.stringify(freq));
+  const fdFix = new FormData(); fdFix.append('date', '2026-09-20'); fdFix.append('companyName', '喫茶アオ'); fdFix.append('totalAmount', '800'); fdFix.append('paymentMethod', '電子マネー'); fdFix.append('invoiceNumber', ''); fdFix.append('category', '会議費');
+  check('店名を訂正 → 200', (await fetch(`${BASE}/api/receipts/${cafe1.body.receipt.id}`, { method: 'PUT', body: fdFix, headers: { cookie: cb } })).status === 200);
+  let freq2 = await getJson('/api/stores', cb);
+  check('訂正すると、元のお店の回数が減る', !freq2.some((s) => s.companyName === '喫茶ミドリ'), JSON.stringify(freq2));
+  check('削除 → 200', (await fetch(`${BASE}/api/receipts/${cafe2.body.receipt.id}`, { method: 'DELETE', headers: { cookie: cb } })).status === 200);
+  const patterns = JSON.parse(fs.readFileSync(path.join(FAKE, B.id, `${patternsFile.id}.bin`), 'utf8'));
+  check('削除すると、そのお店の学習も消える', !patterns.stores.some((s) => s.companyName === '喫茶ミドリ'), JSON.stringify(patterns.stores.map((s) => [s.companyName, s.count])));
+  check('訂正したお店として学習し直される', patterns.stores.some((s) => s.companyName === '喫茶アオ' && s.fingerprints.length === 1));
+  check('手がかりなしの保存も今までどおりできる', (await addLearned(cb, '手入力の店', '', '現金', null)).status === 200);
+  // 学習ファイルが消えても、ドライブの領収書から学習し直す
+  markTrashed(B.id, patternsFile.id);
+  const rebuiltMatch = await (await fetch(`${BASE}/api/stores/match`, { method: 'POST', headers: { cookie: cb, 'content-type': 'application/json' }, body: JSON.stringify({ signals: sigOf(embOf(BAKERY, 98)) }) })).json();
+  check('店舗パターン.jsonを消しても、画像に残した手がかりから学習し直す', rebuiltMatch.candidates?.[0]?.companyName === 'パン工房ムギ' && rebuiltMatch.candidates[0].autoFill === true, JSON.stringify(rebuiltMatch));
 
   console.log(`\n結果: ${pass} OK / ${fail} FAIL`);
   await prisma.$disconnect();

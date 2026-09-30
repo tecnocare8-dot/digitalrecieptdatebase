@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { RECEIPT_CATEGORIES } from '@/lib/categories';
 
 interface Receipt {
     id: string;
@@ -10,6 +11,7 @@ interface Receipt {
     companyName: string | null;
     totalAmount: number | null;
     paymentMethod: string | null;
+    category: string | null;
     imageUrl: string;
     driveUrl: string;
 }
@@ -73,6 +75,7 @@ export default function HistoryPage() {
             formData.append('companyName', editingReceipt.companyName || '');
             formData.append('totalAmount', (editingReceipt.totalAmount || 0).toString());
             formData.append('paymentMethod', editingReceipt.paymentMethod || '現金');
+            formData.append('category', editingReceipt.category || '');
 
             const res = await fetch(`/api/receipts/${encodeURIComponent(editingReceipt.id)}`, {
                 method: 'PUT',
@@ -136,6 +139,7 @@ export default function HistoryPage() {
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">会社名</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">金額</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">支払い</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">分類</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">登録番号</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">画像</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
@@ -160,6 +164,9 @@ export default function HistoryPage() {
                                                     }`}>
                                                     {receipt.paymentMethod || '現金'}
                                                 </span>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                {receipt.category || '-'}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                                 {receipt.invoiceNumber || '-'}
@@ -239,6 +246,19 @@ export default function HistoryPage() {
                                     <option value="クレジットカード">クレジットカード</option>
                                     <option value="電子マネー">電子マネー</option>
                                     <option value="その他">その他</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">分類（勘定科目）</label>
+                                <select
+                                    value={editingReceipt.category || ''}
+                                    onChange={e => setEditingReceipt({ ...editingReceipt, category: e.target.value || null })}
+                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border text-gray-900 bg-white"
+                                >
+                                    <option value="">未分類</option>
+                                    {RECEIPT_CATEGORIES.map((c) => (
+                                        <option key={c} value={c}>{c}</option>
+                                    ))}
                                 </select>
                             </div>
                             <div>
