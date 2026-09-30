@@ -5,7 +5,7 @@ import { errorResponse } from '@/lib/api-errors';
 
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_FOLDER_NAME = '領収書（デジタル領収書管理）';
+const DEFAULT_FOLDER_NAME = '領収書（デジタル経費記録）';
 
 /**
  * 本人のGoogleドライブに、領収書を保存するフォルダを作る（ドライブを使ったことがない人でもボタン1つで作れるように）。

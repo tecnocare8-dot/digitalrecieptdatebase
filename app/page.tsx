@@ -370,7 +370,11 @@ export default function Home() {
     <main className="min-h-screen bg-gray-100 p-4">
       <div className="max-w-md mx-auto bg-white rounded-xl shadow-md overflow-hidden md:max-w-2xl p-6">
         <div className="flex justify-between items-center mb-4">
-          <h1 className="text-xl font-bold text-gray-800">株式会社ＡｗｅｓｏｍｅＬｉｆｅのレシート管理</h1>
+          <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/icons/icon-192.png" alt="" width={32} height={32} className="rounded-lg" />
+            デジタル経費記録
+          </h1>
           <div className="flex items-center gap-3">
             <Link href="/settings" className="text-sm text-gray-600 hover:text-indigo-600 font-medium flex items-center gap-1">
               ⚙ 設定

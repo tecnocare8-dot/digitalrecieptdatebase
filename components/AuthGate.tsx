@@ -17,7 +17,9 @@ function Gate({ children }: { children: React.ReactNode }) {
     return (
       <main className="min-h-screen bg-gray-100 p-4 flex justify-center items-center">
         <div className="max-w-sm w-full bg-white rounded-xl shadow-md p-6 space-y-5 text-center">
-          <h1 className="text-xl font-bold text-gray-800">デジタル領収書管理</h1>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/icons/icon-192.png" alt="" width={72} height={72} className="mx-auto rounded-2xl shadow" />
+          <h1 className="text-xl font-bold text-gray-800">デジタル経費記録</h1>
           <p className="text-sm text-gray-600 leading-relaxed">
             領収書はアカウントごとに保存され、ほかの人からは見えません。
             <br />

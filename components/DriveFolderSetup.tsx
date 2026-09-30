@@ -10,7 +10,7 @@ export interface DriveStatus {
   ledgerUrl: string | null;
 }
 
-const DEFAULT_FOLDER_NAME = '領収書（デジタル領収書管理）';
+const DEFAULT_FOLDER_NAME = '領収書（デジタル経費記録）';
 
 /**
  * Googleドライブの保存先の設定。ドライブを使ったことがない人でも迷わないよう、
