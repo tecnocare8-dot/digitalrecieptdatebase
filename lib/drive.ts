@@ -59,8 +59,12 @@ export function fileUrl(fileId: string) {
 
 const CSV_HEADER = ['ID', '日付', '会社名', '登録番号', '金額', '支払い方法', '分類', '画像ファイル名', '画像リンク', '登録日時', '登録者', '登録者ID'];
 
+// Excelで開いたときに数式として動かないよう、= + - @ などで始まる文字は先頭に ' を付けて書き、読むときに外す
+// （スタッフが入力した会社名などが、代表者のExcelで勝手に計算・リンクにならないように）
+const FORMULA_START = /^[=+\-@\t\r]/;
+
 function csvField(v: string | number | null) {
-  const s = v == null ? '' : String(v);
+  const s = v == null ? '' : typeof v === 'string' && FORMULA_START.test(v) ? `'${v}` : String(v);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
@@ -104,7 +108,8 @@ export function fromCsv(text: string): ReceiptRecord[] {
   const col = (name: string) => header.indexOf(name);
   const get = (r: string[], name: string) => {
     const i = col(name);
-    return i >= 0 && r[i] !== undefined && r[i] !== '' ? r[i] : null;
+    if (i < 0 || r[i] === undefined || r[i] === '') return null;
+    return r[i].startsWith("'") && FORMULA_START.test(r[i].slice(1)) ? r[i].slice(1) : r[i];
   };
   return rows.flatMap((r) => {
     const id = get(r, 'ID');

