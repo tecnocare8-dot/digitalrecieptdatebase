@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useSession } from 'next-auth/react';
 import { RECEIPT_CATEGORIES } from '@/lib/categories';
 
 interface Receipt {
@@ -14,9 +15,18 @@ interface Receipt {
     category: string | null;
     imageUrl: string;
     driveUrl: string;
+    registeredBy: string | null;
+    registeredById: string | null;
 }
 
+// 登録者の絞り込み。'' = すべて、'owner' = 代表者、それ以外は Staff.id
+const OWNER = 'owner';
+
 export default function HistoryPage() {
+    const { data: session } = useSession();
+    // スタッフには自分が登録した分だけが返る。削除・CSV出力・代表者のドライブへのリンクは出さない
+    const isStaff = Boolean(session?.user?.staffId);
+    const [registrant, setRegistrant] = useState('');
     const [receipts, setReceipts] = useState<Receipt[]>([]);
     const [loading, setLoading] = useState(true);
     const [editingReceipt, setEditingReceipt] = useState<Receipt | null>(null);
@@ -59,6 +69,14 @@ export default function HistoryPage() {
             alert('通信エラーが発生しました');
         }
     };
+
+    // 絞り込みの選択肢（帳簿に出てくる登録者。削除済みのスタッフも名前で残る）
+    const registrants = Array.from(
+        new Map(receipts.filter((r) => r.registeredById).map((r) => [r.registeredById as string, r.registeredBy || 'スタッフ'])).entries()
+    );
+    const shown = registrant === ''
+        ? receipts
+        : receipts.filter((r) => (registrant === OWNER ? !r.registeredById : r.registeredById === registrant));
 
     const handleEdit = (receipt: Receipt) => {
         setEditingReceipt(receipt);
@@ -114,15 +132,38 @@ export default function HistoryPage() {
                         <Link href="/" className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
                             ← スキャンへ戻る
                         </Link>
-                        <a href="/api/receipts/export" className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-sm">
-                            CSVダウンロード
-                        </a>
+                        {!isStaff && (
+                            <a href="/api/receipts/export" className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-sm">
+                                CSVダウンロード
+                            </a>
+                        )}
                     </div>
                 </div>
 
+                {isStaff && (
+                    <p className="mb-4 text-sm text-gray-600">自分が登録した領収書だけが表示されます。削除したいときは代表者に連絡してください。</p>
+                )}
+                {!isStaff && registrants.length > 0 && (
+                    <div className="mb-4 flex items-center gap-2">
+                        <label className="text-sm text-gray-700" htmlFor="registrant">登録者</label>
+                        <select
+                            id="registrant"
+                            value={registrant}
+                            onChange={(e) => setRegistrant(e.target.value)}
+                            className="rounded-md border p-1.5 text-sm text-gray-900 bg-white"
+                        >
+                            <option value="">すべて</option>
+                            <option value={OWNER}>代表者</option>
+                            {registrants.map(([id, name]) => (
+                                <option key={id} value={id}>{name}</option>
+                            ))}
+                        </select>
+                    </div>
+                )}
+
                 {loading ? (
                     <div className="text-center py-10 text-gray-500">読み込み中...</div>
-                ) : receipts.length === 0 ? (
+                ) : shown.length === 0 ? (
                     <div className="text-center py-10 bg-white rounded-lg shadow">
                         <p className="text-gray-500 mb-4">保存されたレシートはありません。</p>
                         <Link href="/" className="text-blue-600 hover:underline">
@@ -136,6 +177,7 @@ export default function HistoryPage() {
                                 <thead className="bg-gray-50">
                                     <tr>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">日付</th>
+                                        {!isStaff && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">登録者</th>}
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">会社名</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">金額</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">支払い</th>
@@ -146,11 +188,16 @@ export default function HistoryPage() {
                                     </tr>
                                 </thead>
                                 <tbody className="bg-white divide-y divide-gray-200">
-                                    {receipts.map((receipt) => (
+                                    {shown.map((receipt) => (
                                         <tr key={receipt.id} className="hover:bg-gray-50">
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                                 {receipt.date ? new Date(receipt.date).toLocaleDateString() : '-'}
                                             </td>
+                                            {!isStaff && (
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                    {receipt.registeredById ? receipt.registeredBy || 'スタッフ' : '代表者'}
+                                                </td>
+                                            )}
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                                 {receipt.companyName || '-'}
                                             </td>
@@ -175,9 +222,11 @@ export default function HistoryPage() {
                                                 <a href={receipt.imageUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                                                     画像を見る
                                                 </a>
-                                                <a href={receipt.driveUrl} target="_blank" rel="noopener noreferrer" className="ml-3 text-gray-500 hover:underline">
-                                                    ドライブ
-                                                </a>
+                                                {!isStaff && (
+                                                    <a href={receipt.driveUrl} target="_blank" rel="noopener noreferrer" className="ml-3 text-gray-500 hover:underline">
+                                                        ドライブ
+                                                    </a>
+                                                )}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                                 <button
@@ -186,12 +235,14 @@ export default function HistoryPage() {
                                                 >
                                                     編集
                                                 </button>
-                                                <button
-                                                    onClick={() => handleDelete(receipt.id)}
-                                                    className="text-red-600 hover:text-red-900 bg-red-50 px-3 py-1 rounded-full text-xs font-medium transition-colors hover:bg-red-100"
-                                                >
-                                                    削除
-                                                </button>
+                                                {!isStaff && (
+                                                    <button
+                                                        onClick={() => handleDelete(receipt.id)}
+                                                        className="text-red-600 hover:text-red-900 bg-red-50 px-3 py-1 rounded-full text-xs font-medium transition-colors hover:bg-red-100"
+                                                    >
+                                                        削除
+                                                    </button>
+                                                )}
                                             </td>
                                         </tr>
                                     ))}

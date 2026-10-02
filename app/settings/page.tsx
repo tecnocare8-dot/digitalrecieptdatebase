@@ -4,8 +4,11 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
 import DriveFolderSetup, { type DriveStatus } from '@/components/DriveFolderSetup';
+import StaffManager from '@/components/StaffManager';
 
 interface SettingsData {
+  role: 'owner' | 'staff';
+  displayName: string;
   isPro: boolean;
   isExpired: boolean;
   proExpiresAt: string | null;
@@ -102,6 +105,43 @@ export default function SettingsPage() {
     );
   }
 
+  // スタッフ：プラン・保存先・スタッフ管理は代表者が行うので、ログイン中の名前とログアウトだけ
+  if (settings?.role === 'staff') {
+    return (
+      <main className="min-h-screen bg-gray-50 p-4 md:p-8">
+        <div className="max-w-xl mx-auto bg-white rounded-2xl shadow-sm border p-6 md:p-8 space-y-6">
+          <div className="flex justify-between items-center pb-4 border-b">
+            <h1 className="text-2xl font-bold text-gray-900">設定</h1>
+            <Link href="/" className="text-sm font-medium text-blue-600 hover:text-blue-800">
+              ← 戻る
+            </Link>
+          </div>
+          <div className="space-y-3">
+            <h2 className="text-lg font-bold text-gray-800 border-b pb-2">アカウント</h2>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm text-gray-700">
+                <span className="font-bold">{settings.displayName}</span>（スタッフ）としてログイン中
+              </div>
+              <button
+                onClick={() => signOut({ callbackUrl: '/' })}
+                className="shrink-0 text-xs font-semibold px-4 py-2 bg-white border rounded-lg shadow-sm hover:bg-gray-100 text-gray-700"
+              >
+                ログアウト
+              </button>
+            </div>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              登録した領収書は代表者の帳簿に保存されます。見られるのは自分が登録した分だけです。
+              パスワードを忘れたときや、登録を取り消したいときは代表者に連絡してください。
+            </p>
+            {!settings.canAddReceipt && settings.reason && (
+              <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">{settings.reason}</p>
+            )}
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-8">
       <div className="max-w-xl mx-auto bg-white rounded-2xl shadow-sm border p-6 md:p-8 space-y-8">
@@ -132,6 +172,14 @@ export default function SettingsPage() {
           <div className="p-6 rounded-2xl border border-blue-200 bg-blue-50/40 space-y-4">
             <h2 className="text-lg font-bold text-blue-900">📁 保存先（Googleドライブ）</h2>
             <DriveFolderSetup drive={settings.drive} onChanged={fetchSettings} />
+          </div>
+        )}
+
+        {/* Section: Staff */}
+        {settings && (
+          <div className="p-6 rounded-2xl border border-indigo-200 bg-indigo-50/40 space-y-4">
+            <h2 className="text-lg font-bold text-indigo-900">👥 スタッフ</h2>
+            <StaffManager isPro={settings.isPro} />
           </div>
         )}
 
