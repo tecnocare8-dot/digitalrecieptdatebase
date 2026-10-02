@@ -29,7 +29,13 @@ export interface ReceiptMeta {
   paymentMethod: string | null;
   category: string | null; // 分類（勘定科目）。お店ごとに学習して自動入力する
   createdAt: string; // ISO
+  // 登録した人。代表者本人の登録（と、この列ができる前の行）は registeredById が null
+  registeredBy: string | null; // 表示名
+  registeredById: string | null; // Staff.id。見える範囲の判定はこちらで行う
 }
+
+/** 修正で変えてよい項目（登録日時・登録者は変えさせない） */
+export type ReceiptPatch = Omit<ReceiptMeta, 'createdAt' | 'registeredBy' | 'registeredById'>;
 
 export interface ReceiptRecord extends ReceiptMeta {
   id: string; // 画像ファイルのドライブID
@@ -51,7 +57,7 @@ export function fileUrl(fileId: string) {
 // ---------------------------------------------------------------------------
 // CSV（Excelで文字化けしないよう BOM 付き UTF-8）
 
-const CSV_HEADER = ['ID', '日付', '会社名', '登録番号', '金額', '支払い方法', '分類', '画像ファイル名', '画像リンク', '登録日時'];
+const CSV_HEADER = ['ID', '日付', '会社名', '登録番号', '金額', '支払い方法', '分類', '画像ファイル名', '画像リンク', '登録日時', '登録者', '登録者ID'];
 
 function csvField(v: string | number | null) {
   const s = v == null ? '' : String(v);
@@ -60,7 +66,7 @@ function csvField(v: string | number | null) {
 
 export function toCsv(records: ReceiptRecord[]): string {
   const lines = [CSV_HEADER, ...records.map((r) => [
-    r.id, r.date, r.companyName, r.invoiceNumber, r.totalAmount, r.paymentMethod, r.category, r.imageName, fileUrl(r.id), r.createdAt,
+    r.id, r.date, r.companyName, r.invoiceNumber, r.totalAmount, r.paymentMethod, r.category, r.imageName, fileUrl(r.id), r.createdAt, r.registeredBy, r.registeredById,
   ])];
   return '﻿' + lines.map((l) => l.map(csvField).join(',')).join('\r\n') + '\r\n';
 }
@@ -115,6 +121,8 @@ export function fromCsv(text: string): ReceiptRecord[] {
       category: get(r, '分類'),
       imageName: get(r, '画像ファイル名') ?? '',
       createdAt: get(r, '登録日時') ?? '',
+      registeredBy: get(r, '登録者'),
+      registeredById: get(r, '登録者ID'),
     }];
   });
 }
@@ -363,7 +371,7 @@ function parseDescription(f: RawFile): { meta: ReceiptMeta; signals: ReceiptSign
   try {
     const m = JSON.parse(f.description ?? '');
     if (m?.app !== APP_TAG || !m.receipt) return null;
-    return { meta: { category: null, ...m.receipt }, signals: sanitizeSignals(m.signals) };
+    return { meta: { category: null, registeredBy: null, registeredById: null, ...m.receipt }, signals: sanitizeSignals(m.signals) };
   } catch {
     return null;
   }
@@ -544,7 +552,7 @@ export async function driveForUser(userId: string) {
       });
     },
 
-    async updateReceipt(fileId: string, patch: Omit<ReceiptMeta, 'createdAt'>): Promise<ReceiptRecord | null> {
+    async updateReceipt(fileId: string, patch: ReceiptPatch): Promise<ReceiptRecord | null> {
       const folderId = await requireFolder();
       return withLedgerLock(async () => {
         const { ledgerId, records, record } = await findOwn(fileId);

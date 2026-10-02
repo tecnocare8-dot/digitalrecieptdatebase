@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint",
     "migrate-local": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"CommonJS\"}' node --no-experimental-strip-types --env-file=.env -r ts-node/register scripts/migrate-local-sqlite.ts",
-    "test:stores": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"CommonJS\"}' node --no-experimental-strip-types -r ts-node/register scripts/stores-test.ts"
+    "test:stores": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"CommonJS\"}' node --no-experimental-strip-types -r ts-node/register scripts/stores-test.ts",
+    "test:staff": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"CommonJS\"}' node --no-experimental-strip-types -r ts-node/register scripts/staff-test.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
