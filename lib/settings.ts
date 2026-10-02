@@ -4,6 +4,9 @@ import { DriveAuthError, DriveFolderMissingError, driveForUser } from '@/lib/dri
 export const MAX_FREE_RECEIPTS = 5;
 
 export interface SubscriptionStatus {
+  /** 代表者かスタッフか。スタッフにはプラン購入・ドライブ・スタッフ管理を出さない */
+  role: 'owner' | 'staff';
+  displayName: string;
   isPro: boolean;
   isExpired: boolean;
   proExpiresAt: string | null;
@@ -72,6 +75,8 @@ export async function getSubscriptionStatus(userId: string): Promise<Subscriptio
   }
 
   return {
+    role: 'owner',
+    displayName: user.name || user.email,
     isPro,
     isExpired,
     proExpiresAt: user.proExpiresAt ? user.proExpiresAt.toISOString() : null,
@@ -85,5 +90,27 @@ export async function getSubscriptionStatus(userId: string): Promise<Subscriptio
       folderExists,
       ledgerUrl,
     },
+  };
+}
+
+/** スタッフ向けの読み替え */
+export const STAFF_DRIVE_MESSAGE = '代表者のGoogleドライブとの連携が切れているか、保存用フォルダがありません。代表者にドライブの再連携を依頼してください。';
+export const STAFF_CONTACT_OWNER = '代表者に連絡してください。';
+
+/**
+ * スタッフに返す設定情報。代表者のドライブのリンクや会社全体の件数は出さず、
+ * 困ったときの案内は「代表者に依頼」に置き換える（スタッフ側では直せないため）
+ */
+export function staffView(status: SubscriptionStatus, displayName: string): SubscriptionStatus {
+  const driveReady = status.drive.connected && status.drive.folderExists;
+  let reason = status.reason;
+  if (!status.canAddReceipt) reason = driveReady ? `${status.reason ?? ''} ${STAFF_CONTACT_OWNER}`.trim() : STAFF_DRIVE_MESSAGE;
+  return {
+    ...status,
+    role: 'staff',
+    displayName,
+    receiptCount: 0,
+    reason,
+    drive: { connected: status.drive.connected, folder: null, folderExists: status.drive.folderExists, ledgerUrl: null },
   };
 }

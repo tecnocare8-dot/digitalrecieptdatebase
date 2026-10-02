@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireUserId } from '@/lib/auth';
-import { driveForUser } from '@/lib/drive';
+import { requireActor, type Actor } from '@/lib/auth';
+import { driveForActor } from '@/lib/drive';
 import { errorResponse } from '@/lib/api-errors';
 
 export const dynamic = 'force-dynamic';
@@ -9,11 +9,12 @@ export async function GET(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    let actor: Actor | null = null;
     try {
-        const userId = await requireUserId();
+        actor = await requireActor();
         const { id } = await params;
 
-        const drive = await driveForUser(userId);
+        const drive = await driveForActor(actor);
         const image = await drive.downloadReceipt(id);
         if (!image) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
@@ -25,6 +26,6 @@ export async function GET(
             },
         });
     } catch (error) {
-        return errorResponse(error, 'Error reading receipt image');
+        return errorResponse(error, 'Error reading receipt image', actor);
     }
 }

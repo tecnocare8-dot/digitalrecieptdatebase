@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireUserId } from '@/lib/auth';
+import { requireOwner } from '@/lib/auth';
 import { driveForUser } from '@/lib/drive';
 import { errorResponse } from '@/lib/api-errors';
 
@@ -14,7 +14,7 @@ const DEFAULT_FOLDER_NAME = '領収書（デジタル経費記録）';
  */
 export async function POST(request: NextRequest) {
   try {
-    const userId = await requireUserId();
+    const { ownerId: userId } = await requireOwner();
     const body = await request.json().catch(() => ({}));
     const rawName = typeof body.name === 'string' ? body.name.trim() : '';
     const name = (rawName || DEFAULT_FOLDER_NAME).slice(0, 100);

@@ -15,6 +15,8 @@ export function toClientReceipt(r: ReceiptRecord) {
         paymentMethod: r.paymentMethod,
         category: r.category,
         createdAt: r.createdAt,
+        registeredBy: r.registeredBy,
+        registeredById: r.registeredById,
         imageUrl: receiptImageUrl(r.id),
         driveUrl: fileUrl(r.id),
     };

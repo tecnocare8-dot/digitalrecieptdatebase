@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { addPermission, planStatus } from '@/lib/settings';
-import { requireUserId } from '@/lib/auth';
-import { driveForUser } from '@/lib/drive';
+import { addPermission, planStatus, STAFF_CONTACT_OWNER } from '@/lib/settings';
+import { requireActor, type Actor } from '@/lib/auth';
+import { driveForActor } from '@/lib/drive';
 import { errorResponse } from '@/lib/api-errors';
 import { toClientReceipt } from '@/lib/receipts';
 import { sanitizeSignals } from '@/lib/stores';
@@ -13,9 +13,11 @@ export const dynamic = 'force-dynamic';
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
+    let actor: Actor | null = null;
     try {
-        const userId = await requireUserId();
-        const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+        actor = await requireActor();
+        // 件数制限・Proは代表者（帳簿の持ち主）の状態で判定する
+        const user = await prisma.user.findUniqueOrThrow({ where: { id: actor.ownerId } });
 
         const formData = await request.formData();
 
@@ -50,7 +52,7 @@ export async function POST(request: NextRequest) {
         // Duplicate check disabled - same receipt can be saved multiple times
         // (e.g., toll road receipts on the same day)
 
-        const drive = await driveForUser(userId);
+        const drive = await driveForActor(actor);
         let denied: string | null = null;
         const record = await drive.addReceipt(
             {
@@ -73,14 +75,15 @@ export async function POST(request: NextRequest) {
 
         if (!record) {
             const { isPro, isExpired } = planStatus(user.proExpiresAt);
+            const message = denied || '領収書の新規保存制限に達しています。';
             return NextResponse.json(
-                { error: denied || '領収書の新規保存制限に達しています。', isExpired, isPro },
+                { error: actor.staffId ? `${message} ${STAFF_CONTACT_OWNER}` : message, isExpired, isPro },
                 { status: 402 }
             );
         }
 
         return NextResponse.json({ success: true, receipt: toClientReceipt(record) });
     } catch (error) {
-        return errorResponse(error, 'Error saving receipt');
+        return errorResponse(error, 'Error saving receipt', actor);
     }
 }

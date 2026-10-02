@@ -557,7 +557,8 @@ export async function driveForUser(userId: string) {
       return withLedgerLock(async () => {
         const { ledgerId, records, record } = await findOwn(fileId);
         if (!record) return null;
-        const updated = { ...record, ...patch };
+        // 登録日時・登録者は変えない（patch に紛れていても元の値を残す）
+        const updated = { ...record, ...patch, createdAt: record.createdAt, registeredBy: record.registeredBy, registeredById: record.registeredById };
         const { id: _id, imageName: _name, ...meta } = updated;
         updated.imageName = imageName(meta);
         const image = await backend.getFile(fileId);
@@ -599,6 +600,56 @@ export async function driveForUser(userId: string) {
       const { record } = await findOwn(fileId);
       if (!record) return null;
       return backend.download(fileId);
+    },
+  };
+}
+
+/** 操作している人（lib/auth.ts の Actor と同じ形。drive.ts から auth を読み込まないようにここで定義） */
+export interface DriveActor {
+  ownerId: string;
+  staffId: string | null;
+  displayName: string;
+}
+
+/**
+ * 操作している人から見た帳簿。保存先は常に代表者のドライブ（ロックも代表者単位なので、
+ * 代表者とスタッフが同時に登録しても行が消えない）。
+ * スタッフのときは、自分が登録した行だけを見る・直す・画像を取れるようにし、
+ * 他人の行は「存在しない」扱いにする。削除・CSV出力・フォルダ作成は窓口側で代表者だけに絞る
+ */
+export async function driveForActor(actor: DriveActor) {
+  const drive = await driveForUser(actor.ownerId);
+  const mine = (r: ReceiptRecord) => !actor.staffId || r.registeredById === actor.staffId;
+  const isMine = async (fileId: string) => (await drive.listReceipts()).some((r) => r.id === fileId && mine(r));
+
+  return {
+    connected: drive.connected,
+    folder: drive.folder,
+    frequentStores: drive.frequentStores,
+    matchStores: drive.matchStores,
+    /** 会社全体の帳簿（登録番号からの会社名の照会など、内容を返さない用途だけに使う） */
+    listAllReceipts: drive.listReceipts,
+
+    async listReceipts(): Promise<ReceiptRecord[]> {
+      return (await drive.listReceipts()).filter(mine);
+    },
+
+    /** 登録者は操作している人で決める（画面から送られた値は使わない） */
+    addReceipt(meta: ReceiptPatch & { createdAt: string }, image: Buffer, canAdd: (count: number) => boolean, signals: ReceiptSignals | null = null) {
+      return drive.addReceipt(
+        { ...meta, registeredBy: actor.displayName, registeredById: actor.staffId },
+        image, canAdd, signals,
+      );
+    },
+
+    async updateReceipt(fileId: string, patch: ReceiptPatch): Promise<ReceiptRecord | null> {
+      if (actor.staffId && !(await isMine(fileId))) return null;
+      return drive.updateReceipt(fileId, patch);
+    },
+
+    async downloadReceipt(fileId: string): Promise<Buffer | null> {
+      if (actor.staffId && !(await isMine(fileId))) return null;
+      return drive.downloadReceipt(fileId);
     },
   };
 }

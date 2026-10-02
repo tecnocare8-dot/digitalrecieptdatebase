@@ -1,22 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireUserId } from '@/lib/auth';
-import { driveForUser } from '@/lib/drive';
+import { requireActor, requireOwner, type Actor } from '@/lib/auth';
+import { driveForActor, driveForUser } from '@/lib/drive';
 import { errorResponse } from '@/lib/api-errors';
 import { toClientReceipt } from '@/lib/receipts';
 
 export const dynamic = 'force-dynamic';
 
-// 本人のドライブの一覧CSVに載っている領収書だけを対象にする。他人のIDを指定しても「存在しない」扱い
+// 帳簿（代表者のドライブの一覧CSV）に載っている領収書だけを対象にする。他人のIDを指定しても「存在しない」扱い。
+// スタッフは自分が登録した分だけ直せる。削除は証憑を消せないよう代表者だけ
 
 export async function DELETE(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    let actor: Actor | null = null;
     try {
-        const userId = await requireUserId();
+        actor = await requireOwner();
         const { id } = await params;
 
-        const drive = await driveForUser(userId);
+        const drive = await driveForUser(actor.ownerId);
         const deleted = await drive.trashReceipt(id);
         if (!deleted) {
             return NextResponse.json({ error: 'Receipt not found' }, { status: 404 });
@@ -24,7 +26,7 @@ export async function DELETE(
 
         return NextResponse.json({ success: true });
     } catch (error) {
-        return errorResponse(error, 'Error deleting receipt');
+        return errorResponse(error, 'Error deleting receipt', actor);
     }
 }
 
@@ -32,8 +34,9 @@ export async function PUT(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    let actor: Actor | null = null;
     try {
-        const userId = await requireUserId();
+        actor = await requireActor();
         const { id } = await params;
 
         const formData = await request.formData();
@@ -45,7 +48,7 @@ export async function PUT(
         const paymentMethod = formData.get('paymentMethod') as string;
         const category = formData.get('category') as string | null;
 
-        const drive = await driveForUser(userId);
+        const drive = await driveForActor(actor);
         const updated = await drive.updateReceipt(id, {
             date: dateStr ? dateStr.slice(0, 10) : null,
             invoiceNumber: invoiceNumber || null,
@@ -58,6 +61,6 @@ export async function PUT(
 
         return NextResponse.json(toClientReceipt(updated));
     } catch (e) {
-        return errorResponse(e, 'Error updating receipt');
+        return errorResponse(e, 'Error updating receipt', actor);
     }
 }

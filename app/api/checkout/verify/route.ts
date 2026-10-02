@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireUserId, UnauthorizedError, unauthorizedResponse } from '@/lib/auth';
+import { ForbiddenError, forbiddenResponse, requireOwner, UnauthorizedError, unauthorizedResponse } from '@/lib/auth';
 import { getStripe, grantProForSession } from '@/lib/stripe';
 
 export const dynamic = 'force-dynamic';
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(request: NextRequest) {
   try {
-    const userId = await requireUserId();
+    const { ownerId: userId } = await requireOwner();
     const { sessionId } = await request.json();
     if (typeof sessionId !== 'string' || !sessionId.startsWith('cs_')) {
       return NextResponse.json({ error: 'Invalid session' }, { status: 400 });
@@ -25,6 +25,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ result });
   } catch (error) {
     if (error instanceof UnauthorizedError) return unauthorizedResponse();
+    if (error instanceof ForbiddenError) return forbiddenResponse();
     console.error('Checkout verify error:', error);
     return NextResponse.json({ error: '決済状況の確認に失敗しました。' }, { status: 500 });
   }

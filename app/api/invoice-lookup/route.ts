@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireUserId } from '@/lib/auth';
-import { DriveAuthError, DriveFolderMissingError, driveForUser, type ReceiptRecord } from '@/lib/drive';
+import { requireActor } from '@/lib/auth';
+import { DriveAuthError, DriveFolderMissingError, driveForActor, type ReceiptRecord } from '@/lib/drive';
 import { errorResponse } from '@/lib/api-errors';
 
 export const dynamic = 'force-dynamic';
@@ -32,13 +32,14 @@ export async function GET(request: NextRequest) {
     }
 
     try {
-        const userId = await requireUserId();
+        const actor = await requireActor();
 
-        // 1. 本人が過去に同じ登録番号で保存した会社名（ドライブの一覧CSVから）。
+        // 1. 会社の帳簿で過去に同じ登録番号で保存した会社名（ドライブの一覧CSVから）。
+        //    スタッフも会社全体の履歴から会社名だけを受け取る（お店の学習と同じく会社で共有）。
         //    ドライブ未連携・フォルダ未作成なら飛ばして国税庁の照会へ進む
         let history: ReceiptRecord[] = [];
         try {
-            history = await (await driveForUser(userId)).listReceipts();
+            history = await (await driveForActor(actor)).listAllReceipts();
         } catch (e) {
             if (!(e instanceof DriveAuthError) && !(e instanceof DriveFolderMissingError)) throw e;
         }
