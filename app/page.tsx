@@ -33,6 +33,8 @@ interface StoreSuggestion {
 }
 
 interface SubscriptionSettings {
+  role: 'owner' | 'staff';
+  displayName: string;
   isPro: boolean;
   isExpired: boolean;
   proExpiresAt: string | null;
@@ -385,8 +387,20 @@ export default function Home() {
           </div>
         </div>
 
+        {/* スタッフ：プラン・ドライブは代表者が管理するので、誰の名前で登録されるかだけを出す */}
+        {subSettings?.role === 'staff' && (
+          <div className="mb-6 p-3 bg-gray-50 border rounded-lg space-y-1">
+            <div className="text-sm text-gray-700">
+              <span className="font-bold">{subSettings.displayName}</span>（スタッフ）としてログイン中
+            </div>
+            {!subSettings.canAddReceipt && subSettings.reason && (
+              <p className="text-xs text-red-700 leading-relaxed">{subSettings.reason}</p>
+            )}
+          </div>
+        )}
+
         {/* Plan Status Banner */}
-        {subSettings && (
+        {subSettings && subSettings.role !== 'staff' && (
           <div className="mb-6 p-3 bg-gray-50 border rounded-lg flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="text-xs text-gray-500 font-medium">プラン:</span>
@@ -419,7 +433,7 @@ export default function Home() {
         )}
 
         {/* 保存先が未設定なら、撮影より先にドライブの準備を案内する */}
-        {subSettings && (!subSettings.drive.connected || !subSettings.drive.folderExists) && (
+        {subSettings && subSettings.role !== 'staff' && (!subSettings.drive.connected || !subSettings.drive.folderExists) && (
           <div className="mb-6 p-4 rounded-xl border-2 border-blue-300 bg-blue-50 space-y-3">
             <h2 className="font-bold text-blue-900">はじめに：保存先のフォルダを用意しましょう</h2>
             <DriveFolderSetup drive={subSettings.drive} onChanged={fetchSubSettings} />

@@ -108,6 +108,8 @@ async function main() {
       paymentMethod: r.paymentMethod,
       category: null,
       createdAt: (toDate(r.createdAt) ?? new Date()).toISOString(),
+      registeredBy: null,
+      registeredById: null,
     };
     if (existing.has(keyOf(meta))) {
       skipped++;

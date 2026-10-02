@@ -29,7 +29,13 @@ export interface ReceiptMeta {
   paymentMethod: string | null;
   category: string | null; // 分類（勘定科目）。お店ごとに学習して自動入力する
   createdAt: string; // ISO
+  // 登録した人。代表者本人の登録（と、この列ができる前の行）は registeredById が null
+  registeredBy: string | null; // 表示名
+  registeredById: string | null; // Staff.id。見える範囲の判定はこちらで行う
 }
+
+/** 修正で変えてよい項目（登録日時・登録者は変えさせない） */
+export type ReceiptPatch = Omit<ReceiptMeta, 'createdAt' | 'registeredBy' | 'registeredById'>;
 
 export interface ReceiptRecord extends ReceiptMeta {
   id: string; // 画像ファイルのドライブID
@@ -51,16 +57,20 @@ export function fileUrl(fileId: string) {
 // ---------------------------------------------------------------------------
 // CSV（Excelで文字化けしないよう BOM 付き UTF-8）
 
-const CSV_HEADER = ['ID', '日付', '会社名', '登録番号', '金額', '支払い方法', '分類', '画像ファイル名', '画像リンク', '登録日時'];
+const CSV_HEADER = ['ID', '日付', '会社名', '登録番号', '金額', '支払い方法', '分類', '画像ファイル名', '画像リンク', '登録日時', '登録者', '登録者ID'];
+
+// Excelで開いたときに数式として動かないよう、= + - @ などで始まる文字は先頭に ' を付けて書き、読むときに外す
+// （スタッフが入力した会社名などが、代表者のExcelで勝手に計算・リンクにならないように）
+const FORMULA_START = /^[=+\-@\t\r]/;
 
 function csvField(v: string | number | null) {
-  const s = v == null ? '' : String(v);
+  const s = v == null ? '' : typeof v === 'string' && FORMULA_START.test(v) ? `'${v}` : String(v);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 export function toCsv(records: ReceiptRecord[]): string {
   const lines = [CSV_HEADER, ...records.map((r) => [
-    r.id, r.date, r.companyName, r.invoiceNumber, r.totalAmount, r.paymentMethod, r.category, r.imageName, fileUrl(r.id), r.createdAt,
+    r.id, r.date, r.companyName, r.invoiceNumber, r.totalAmount, r.paymentMethod, r.category, r.imageName, fileUrl(r.id), r.createdAt, r.registeredBy, r.registeredById,
   ])];
   return '﻿' + lines.map((l) => l.map(csvField).join(',')).join('\r\n') + '\r\n';
 }
@@ -98,7 +108,8 @@ export function fromCsv(text: string): ReceiptRecord[] {
   const col = (name: string) => header.indexOf(name);
   const get = (r: string[], name: string) => {
     const i = col(name);
-    return i >= 0 && r[i] !== undefined && r[i] !== '' ? r[i] : null;
+    if (i < 0 || r[i] === undefined || r[i] === '') return null;
+    return r[i].startsWith("'") && FORMULA_START.test(r[i].slice(1)) ? r[i].slice(1) : r[i];
   };
   return rows.flatMap((r) => {
     const id = get(r, 'ID');
@@ -115,6 +126,8 @@ export function fromCsv(text: string): ReceiptRecord[] {
       category: get(r, '分類'),
       imageName: get(r, '画像ファイル名') ?? '',
       createdAt: get(r, '登録日時') ?? '',
+      registeredBy: get(r, '登録者'),
+      registeredById: get(r, '登録者ID'),
     }];
   });
 }
@@ -363,7 +376,7 @@ function parseDescription(f: RawFile): { meta: ReceiptMeta; signals: ReceiptSign
   try {
     const m = JSON.parse(f.description ?? '');
     if (m?.app !== APP_TAG || !m.receipt) return null;
-    return { meta: { category: null, ...m.receipt }, signals: sanitizeSignals(m.signals) };
+    return { meta: { category: null, registeredBy: null, registeredById: null, ...m.receipt }, signals: sanitizeSignals(m.signals) };
   } catch {
     return null;
   }
@@ -544,12 +557,13 @@ export async function driveForUser(userId: string) {
       });
     },
 
-    async updateReceipt(fileId: string, patch: Omit<ReceiptMeta, 'createdAt'>): Promise<ReceiptRecord | null> {
+    async updateReceipt(fileId: string, patch: ReceiptPatch): Promise<ReceiptRecord | null> {
       const folderId = await requireFolder();
       return withLedgerLock(async () => {
         const { ledgerId, records, record } = await findOwn(fileId);
         if (!record) return null;
-        const updated = { ...record, ...patch };
+        // 登録日時・登録者は変えない（patch に紛れていても元の値を残す）
+        const updated = { ...record, ...patch, createdAt: record.createdAt, registeredBy: record.registeredBy, registeredById: record.registeredById };
         const { id: _id, imageName: _name, ...meta } = updated;
         updated.imageName = imageName(meta);
         const image = await backend.getFile(fileId);
@@ -591,6 +605,56 @@ export async function driveForUser(userId: string) {
       const { record } = await findOwn(fileId);
       if (!record) return null;
       return backend.download(fileId);
+    },
+  };
+}
+
+/** 操作している人（lib/auth.ts の Actor と同じ形。drive.ts から auth を読み込まないようにここで定義） */
+export interface DriveActor {
+  ownerId: string;
+  staffId: string | null;
+  displayName: string;
+}
+
+/**
+ * 操作している人から見た帳簿。保存先は常に代表者のドライブ（ロックも代表者単位なので、
+ * 代表者とスタッフが同時に登録しても行が消えない）。
+ * スタッフのときは、自分が登録した行だけを見る・直す・画像を取れるようにし、
+ * 他人の行は「存在しない」扱いにする。削除・CSV出力・フォルダ作成は窓口側で代表者だけに絞る
+ */
+export async function driveForActor(actor: DriveActor) {
+  const drive = await driveForUser(actor.ownerId);
+  const mine = (r: ReceiptRecord) => !actor.staffId || r.registeredById === actor.staffId;
+  const isMine = async (fileId: string) => (await drive.listReceipts()).some((r) => r.id === fileId && mine(r));
+
+  return {
+    connected: drive.connected,
+    folder: drive.folder,
+    frequentStores: drive.frequentStores,
+    matchStores: drive.matchStores,
+    /** 会社全体の帳簿（登録番号からの会社名の照会など、内容を返さない用途だけに使う） */
+    listAllReceipts: drive.listReceipts,
+
+    async listReceipts(): Promise<ReceiptRecord[]> {
+      return (await drive.listReceipts()).filter(mine);
+    },
+
+    /** 登録者は操作している人で決める（画面から送られた値は使わない） */
+    addReceipt(meta: ReceiptPatch & { createdAt: string }, image: Buffer, canAdd: (count: number) => boolean, signals: ReceiptSignals | null = null) {
+      return drive.addReceipt(
+        { ...meta, registeredBy: actor.displayName, registeredById: actor.staffId },
+        image, canAdd, signals,
+      );
+    },
+
+    async updateReceipt(fileId: string, patch: ReceiptPatch): Promise<ReceiptRecord | null> {
+      if (actor.staffId && !(await isMine(fileId))) return null;
+      return drive.updateReceipt(fileId, patch);
+    },
+
+    async downloadReceipt(fileId: string): Promise<Buffer | null> {
+      if (actor.staffId && !(await isMine(fileId))) return null;
+      return drive.downloadReceipt(fileId);
     },
   };
 }

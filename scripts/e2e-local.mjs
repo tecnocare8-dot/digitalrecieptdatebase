@@ -51,6 +51,23 @@ async function cookieFor(user) {
   return `next-auth.session-token=${token}`;
 }
 
+// スタッフの実際のログイン（CSRFトークンを取り、ID・パスワードを送る）。成功ならセッションのcookie、失敗なら error を返す
+async function staffLogin(loginId, password) {
+  const csrfRes = await fetch(`${BASE}/api/auth/csrf`);
+  const { csrfToken } = await csrfRes.json();
+  const csrfCookie = csrfRes.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
+  const res = await fetch(`${BASE}/api/auth/callback/credentials`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: csrfCookie },
+    body: new URLSearchParams({ csrfToken, loginId, password, json: 'true' }),
+  });
+  const session = res.headers.getSetCookie().map((c) => c.split(';')[0]).find((c) => c.startsWith('next-auth.session-token='));
+  // 失敗時は 401 と { url: '.../api/auth/error?error=…' } が返る（json=true のため）
+  const location = res.headers.get('location') ?? (await res.json().catch(() => ({}))).url ?? '';
+  return { cookie: session ?? null, error: new URL(location, BASE).searchParams.get('error') };
+}
+
 // 擬似ドライブの中身を直接見る（ドライブを開いたときに見えるもの）
 function fakeFiles(userId) {
   const dir = path.join(FAKE, userId);
@@ -146,7 +163,7 @@ async function main() {
   check('作成直後に空の一覧CSVがドライブにある', (ledgerText(A.id) ?? '').startsWith('﻿ID,日付,会社名,登録番号,金額,支払い方法,分類,画像ファイル名,画像リンク,登録日時'));
   const emptyName = await createFolder(cb, '   ');
   const bFolder = (await emptyName.json()).folder;
-  check('名前が空なら既定の名前で作る', bFolder.name === '領収書（デジタル領収書管理）', bFolder.name);
+  check('名前が空なら既定の名前で作る', bFolder.name === '領収書（デジタル経費記録）', bFolder.name);
 
   console.log('4. 保存は本人のドライブ（CSV＋画像）へ・無料5件まで');
   for (let i = 1; i <= 5; i++) {
@@ -309,6 +326,127 @@ async function main() {
   markTrashed(B.id, patternsFile.id);
   const rebuiltMatch = await (await fetch(`${BASE}/api/stores/match`, { method: 'POST', headers: { cookie: cb, 'content-type': 'application/json' }, body: JSON.stringify({ signals: sigOf(embOf(BAKERY, 98)) }) })).json();
   check('店舗パターン.jsonを消しても、画像に残した手がかりから学習し直す', rebuiltMatch.candidates?.[0]?.companyName === 'パン工房ムギ' && rebuiltMatch.candidates[0].autoFill === true, JSON.stringify(rebuiltMatch));
+
+  console.log('12. スタッフ（代表者の帳簿を複数人で使う）');
+  const staffApi = (cookie, method, p = '', bodyObj) => fetch(`${BASE}/api/staff${p}`, {
+    method, headers: { cookie, 'content-type': 'application/json' }, body: bodyObj ? JSON.stringify(bodyObj) : undefined,
+  });
+  const putReceipt = (cookie, id, fields) => {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries({ date: '2026-10-01', invoiceNumber: '', totalAmount: '500', paymentMethod: '現金', ...fields })) fd.append(k, v);
+    return fetch(`${BASE}/api/receipts/${id}`, { method: 'PUT', body: fd, headers: { cookie } });
+  };
+  r = await staffApi(cc, 'POST', '', { loginId: 'nopro', displayName: '無料', password: 'password-123' });
+  check('Proでない代表者はスタッフを追加できない → 402', r.status === 402, r.status);
+  r = await staffApi(cb, 'POST', '', { loginId: 'Tanaka', displayName: '田中', password: 'password-123' });
+  body = await r.json();
+  check('Proの代表者はスタッフを追加できる（IDは小文字にそろう）', r.status === 200 && body.staff.loginId === 'tanaka' && body.password === 'password-123', JSON.stringify(body));
+  const s1 = body.staff;
+  check('応答にパスワードの変換値は含まれない', !JSON.stringify(body).includes('scrypt'));
+  check('同じログインID → 409', (await staffApi(cb, 'POST', '', { loginId: 'tanaka', displayName: '別人', password: 'password-123' })).status === 409);
+  check('他の代表者でも同じログインIDは使えない → 409', (await staffApi(cb, 'POST', '', { loginId: 'TANAKA ', displayName: '別人', password: 'password-123' })).status === 409);
+  check('ログインIDの形式違反 → 400', (await staffApi(cb, 'POST', '', { loginId: 'あ', displayName: 'x', password: 'password-123' })).status === 400);
+  check('短いパスワード → 400', (await staffApi(cb, 'POST', '', { loginId: 'shortpw', displayName: 'x', password: '1234567' })).status === 400);
+  r = await staffApi(cb, 'POST', '', { loginId: 'sato', displayName: '佐藤' });
+  body = await r.json();
+  check('パスワード省略で12文字が発行される', r.status === 200 && /^[a-z2-9]{12}$/.test(body.password), JSON.stringify(body));
+  const s2 = body.staff, s2pw = body.password;
+  const s3 = (await (await staffApi(cb, 'POST', '', { loginId: 'suzuki', displayName: '鈴木', password: 'password-333' })).json()).staff;
+  const extra = await Promise.all(['st4', 'st5', 'st6', 'st7'].map((id) => staffApi(cb, 'POST', '', { loginId: id, displayName: id, password: 'password-123' })));
+  check('同時に追加しても5人まで（6人目以降 → 409）', extra.filter((x) => x.status === 200).length === 2 && extra.filter((x) => x.status === 409).length === 2, extra.map((x) => x.status).join(','));
+  const staffList = await getJson('/api/staff', cb);
+  check('スタッフ一覧は5人', staffList.length === 5, staffList.length);
+
+  let li = await staffLogin('tanaka', 'wrong-password');
+  check('間違ったパスワードではログインできない', li.cookie === null && li.error === 'CredentialsSignin', JSON.stringify(li));
+  li = await staffLogin('nobody', 'password-123');
+  check('存在しないIDも同じ失敗', li.cookie === null && li.error === 'CredentialsSignin', JSON.stringify(li));
+  li = await staffLogin(' Tanaka', 'password-123');
+  check('正しいID・パスワードでログインできる', !!li.cookie, JSON.stringify(li));
+  const cs1 = li.cookie;
+  const cs2 = (await staffLogin('sato', s2pw)).cookie;
+  const sess = await getJson('/api/auth/session', cs1);
+  check('セッションは代表者の帳簿とスタッフID', sess.user?.id === B.id && sess.user?.staffId === s1.id && sess.user?.name === '田中', JSON.stringify(sess));
+
+  s = await getJson('/api/settings', cs1);
+  check('スタッフの設定はrole=staff・代表者のドライブのリンクを出さない', s.role === 'staff' && s.drive.ledgerUrl === null && s.drive.folder === null && s.canAddReceipt === true, JSON.stringify(s));
+  r = await addReceipt(cs1, 21, '田中の立替');
+  body = await r.json();
+  check('スタッフが登録 → 200・登録者が自分', r.status === 200 && body.receipt.registeredBy === '田中' && body.receipt.registeredById === s1.id, JSON.stringify(body));
+  const s1Receipt = body.receipt.id;
+  const s2Receipt = (await (await addReceipt(cs2, 22, '佐藤の立替')).json()).receipt.id;
+  const csvB = ledgerText(B.id, bFolderNow);
+  check('代表者のドライブのCSVに登録者・登録者IDが入る', csvB.split('\r\n')[0].endsWith('登録者,登録者ID') && csvB.includes(`田中,${s1.id}`));
+  const ownerList = await getJson('/api/receipts/list', cb);
+  const ownerReceipt = ownerList.find((x) => !x.registeredById).id;
+  check('代表者の一覧には全員分（登録者付き）', ownerList.some((x) => x.registeredBy === '田中') && ownerList.some((x) => x.registeredBy === '佐藤'));
+  let sl = await getJson('/api/receipts/list', cs1);
+  check('スタッフの一覧は自分の分だけ', sl.length === 1 && sl[0].id === s1Receipt, JSON.stringify(sl.map((x) => x.companyName)));
+  check('スタッフは代表者の分の画像 → 404', (await fetch(`${BASE}/api/receipts/${ownerReceipt}/image`, { headers: { cookie: cs1 } })).status === 404);
+  check('スタッフは他のスタッフの分の画像 → 404', (await fetch(`${BASE}/api/receipts/${s2Receipt}/image`, { headers: { cookie: cs1 } })).status === 404);
+  check('スタッフは自分の分の画像を見られる', (await fetch(`${BASE}/api/receipts/${s1Receipt}/image`, { headers: { cookie: cs1 } })).status === 200);
+  check('スタッフは代表者の分を修正できない → 404', (await putReceipt(cs1, ownerReceipt, { companyName: '乗っ取り' })).status === 404);
+  check('スタッフは他のスタッフの分を修正できない → 404', (await putReceipt(cs1, s2Receipt, { companyName: '乗っ取り' })).status === 404);
+  check('帳簿は書き換わっていない', !ledgerText(B.id, bFolderNow).includes('乗っ取り'));
+  r = await putReceipt(cs1, s1Receipt, { companyName: '田中の修正', registeredBy: '代表者', registeredById: '' });
+  body = await r.json();
+  check('自分の分は修正でき、登録者は書き換えられない', r.status === 200 && body.companyName === '田中の修正' && body.registeredById === s1.id && body.registeredBy === '田中', JSON.stringify(body));
+  check('代表者はスタッフの分も修正できる', (await putReceipt(cb, s2Receipt, { companyName: '代表者が修正' })).status === 200);
+  check('代表者が直してもスタッフの登録者は残る', (await getJson('/api/receipts/list', cs2)).some((x) => x.id === s2Receipt && x.companyName === '代表者が修正'));
+  check('スタッフは自分の分も削除できない → 403', (await fetch(`${BASE}/api/receipts/${s1Receipt}`, { method: 'DELETE', headers: { cookie: cs1 } })).status === 403);
+  check('スタッフはCSV出力できない → 403', (await fetch(`${BASE}/api/receipts/export`, { headers: { cookie: cs1 } })).status === 403);
+  check('スタッフはフォルダを作れない → 403', (await createFolder(cs1, 'x')).status === 403);
+  check('スタッフはPro購入できない → 403', (await fetch(`${BASE}/api/checkout`, { method: 'POST', headers: { cookie: cs1 } })).status === 403);
+  check('スタッフはスタッフ一覧を見られない → 403', (await staffApi(cs1, 'GET')).status === 403);
+  check('スタッフはスタッフを追加できない → 403', (await staffApi(cs1, 'POST', '', { loginId: 'evil', displayName: 'x', password: 'password-123' })).status === 403);
+  check('スタッフは他のスタッフのパスワードを再設定できない → 403', (await staffApi(cs1, 'PATCH', `/${s2.id}`, { resetPassword: true })).status === 403);
+  check('スタッフもお店の候補は使える', (await fetch(`${BASE}/api/stores`, { headers: { cookie: cs1 } })).status === 200);
+  check('他の代表者（A）はBのスタッフを再設定できない → 404', (await staffApi(ca, 'PATCH', `/${s1.id}`, { resetPassword: true })).status === 404);
+  check('他の代表者（A）はBのスタッフを削除できない → 404', (await staffApi(ca, 'DELETE', `/${s1.id}`)).status === 404);
+
+  const before = ledgerText(B.id, bFolderNow).trim().split('\r\n').length;
+  const mixed = await Promise.all([
+    addReceipt(cb, 23, '同時B1'), addReceipt(cs1, 24, '同時S1'), addReceipt(cs2, 25, '同時S2'),
+    addReceipt(cb, 26, '同時B2'), addReceipt(cs1, 27, '同時S3'), addReceipt(cs2, 28, '同時S4'),
+  ]);
+  const afterMixed = ledgerText(B.id, bFolderNow);
+  check('代表者とスタッフが同時に登録しても行が欠けない', mixed.every((x) => x.status === 200) && afterMixed.trim().split('\r\n').length === before + 6
+    && ['同時B1', '同時S1', '同時S2', '同時B2', '同時S3', '同時S4'].every((n) => afterMixed.includes(n)), mixed.map((x) => x.status).join(','));
+
+  for (let i = 0; i < 10; i++) await staffLogin('suzuki', 'wrong-password');
+  li = await staffLogin('suzuki', 'password-333');
+  check('10回失敗すると正しいパスワードでも停止中', li.cookie === null && li.error === 'STAFF_LOCKED', JSON.stringify(li));
+  check('一覧に停止中と出る', (await getJson('/api/staff', cb)).find((x) => x.id === s3.id)?.locked === true);
+  r = await staffApi(cb, 'PATCH', `/${s3.id}`, { resetPassword: true, password: 'new-password-3' });
+  check('代表者がパスワードを再設定 → 200', r.status === 200 && (await r.json()).password === 'new-password-3');
+  check('再設定で停止が解除され、新しいパスワードで入れる', !!(await staffLogin('suzuki', 'new-password-3')).cookie);
+
+  r = await staffApi(cb, 'PATCH', `/${s1.id}`, { resetPassword: true });
+  check('田中のパスワードを再設定', r.status === 200);
+  check('再設定前のログインは次の操作で無効（401）', (await fetch(`${BASE}/api/receipts/list`, { headers: { cookie: cs1 } })).status === 401);
+  check('画面のセッションからも外れる', !(await getJson('/api/auth/session', cs1)).user);
+  check('古いパスワードではログインできない', !(await staffLogin('tanaka', 'password-123')).cookie);
+  check('表示名を変更できる', (await staffApi(cb, 'PATCH', `/${s2.id}`, { displayName: '佐藤（経理）' })).status === 200);
+  check('表示名の変更ではログインは切れない', (await fetch(`${BASE}/api/receipts/list`, { headers: { cookie: cs2 } })).status === 200);
+
+  markTrashed(B.id, bFolderNow);
+  r = await addReceipt(cs2, 29);
+  body = await r.json();
+  check('代表者のフォルダが無いとき、スタッフには代表者に依頼する案内', r.status === 409 && body.code === 'DRIVE_OWNER' && body.error.includes('代表者'), JSON.stringify(body));
+  s = await getJson('/api/settings', cs2);
+  check('スタッフの設定にも代表者に依頼する案内', !s.canAddReceipt && s.reason.includes('代表者'), JSON.stringify(s));
+  const bFolderFile = path.join(FAKE, B.id, `${bFolderNow}.json`);
+  fs.writeFileSync(bFolderFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(bFolderFile, 'utf8')), trashed: false }));
+  await prisma.user.update({ where: { id: B.id }, data: { proExpiresAt: new Date(Date.now() - 86400000) } });
+  r = await addReceipt(cs2, 30);
+  body = await r.json();
+  check('代表者のProが切れたら、スタッフは登録できず代表者に連絡する案内（402）', r.status === 402 && body.error.includes('代表者に連絡'), JSON.stringify(body));
+  check('Proが切れてもスタッフは自分の分を見られる', (await getJson('/api/receipts/list', cs2)).length >= 1);
+
+  check('スタッフを削除 → 200', (await staffApi(cb, 'DELETE', `/${s2.id}`)).status === 200);
+  check('削除されたスタッフは次の操作で401', (await fetch(`${BASE}/api/receipts/list`, { headers: { cookie: cs2 } })).status === 401);
+  check('削除しても過去の領収書と登録者名は帳簿に残る', ledgerText(B.id, bFolderNow).includes('佐藤'));
+  check('削除したスタッフはログインできない', !(await staffLogin('sato', s2pw)).cookie);
 
   console.log(`\n結果: ${pass} OK / ${fail} FAIL`);
   await prisma.$disconnect();

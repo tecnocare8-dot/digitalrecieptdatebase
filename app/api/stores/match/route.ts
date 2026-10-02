@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireUserId } from '@/lib/auth';
-import { DriveAuthError, DriveFolderMissingError, driveForUser } from '@/lib/drive';
+import { requireActor } from '@/lib/auth';
+import { DriveAuthError, DriveFolderMissingError, driveForActor } from '@/lib/drive';
 import { errorResponse } from '@/lib/api-errors';
 import { AUTO_FILL_SCORE, sanitizeSignals } from '@/lib/stores';
 
@@ -12,14 +12,14 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(request: NextRequest) {
   try {
-    const userId = await requireUserId();
+    const actor = await requireActor();
     const body = await request.json().catch(() => ({}));
     const signals = sanitizeSignals(body.signals);
     if (!signals) return NextResponse.json({ error: 'Invalid signals' }, { status: 400 });
     const invoiceNumber = typeof body.invoiceNumber === 'string' && /^T\d{13}$/.test(body.invoiceNumber) ? body.invoiceNumber : null;
 
     try {
-      const candidates = await (await driveForUser(userId)).matchStores(signals, invoiceNumber);
+      const candidates = await (await driveForActor(actor)).matchStores(signals, invoiceNumber);
       return NextResponse.json({
         candidates: candidates.map((c, i) => ({ ...c, autoFill: i === 0 && c.score >= AUTO_FILL_SCORE })),
       });

@@ -1,18 +1,20 @@
 import { NextResponse } from 'next/server';
-import { requireUserId } from '@/lib/auth';
-import { driveForUser } from '@/lib/drive';
+import { requireActor, type Actor } from '@/lib/auth';
+import { driveForActor } from '@/lib/drive';
 import { errorResponse } from '@/lib/api-errors';
 import { dedupeReceipts, toClientReceipt } from '@/lib/receipts';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+    let actor: Actor | null = null;
     try {
-        const userId = await requireUserId();
-        const drive = await driveForUser(userId);
+        // スタッフは自分が登録した分だけ
+        actor = await requireActor();
+        const drive = await driveForActor(actor);
         const records = await drive.listReceipts();
         return NextResponse.json(dedupeReceipts(records).map(toClientReceipt));
     } catch (error) {
-        return errorResponse(error, 'Error fetching receipts');
+        return errorResponse(error, 'Error fetching receipts', actor);
     }
 }

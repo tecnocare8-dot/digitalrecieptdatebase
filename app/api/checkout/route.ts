@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireUserId, UnauthorizedError, unauthorizedResponse } from '@/lib/auth';
+import { ForbiddenError, forbiddenResponse, requireOwner, UnauthorizedError, unauthorizedResponse } from '@/lib/auth';
 import { getStripe, PRO_PRICE_JPY, PRO_PRODUCT_ID } from '@/lib/stripe';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const userId = await requireUserId();
+    const { ownerId: userId } = await requireOwner();
     const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
     const stripe = getStripe();
 
@@ -43,6 +43,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ url: session.url });
   } catch (error) {
     if (error instanceof UnauthorizedError) return unauthorizedResponse();
+    if (error instanceof ForbiddenError) return forbiddenResponse();
     console.error('Stripe Checkout Error:', error);
     return NextResponse.json(
       { error: '決済画面を開けませんでした。時間をおいて再度お試しください。' },

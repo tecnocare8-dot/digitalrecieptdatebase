@@ -31,6 +31,7 @@ model User {
   driveFolderName    String?
   createdAt          DateTime  @default(now())
   payments           Payment[]
+  staff              Staff[]
 
   @@schema("app")
 }
@@ -46,5 +47,26 @@ model Payment {
   currency        String
   createdAt       DateTime @default(now())
 
+  @@schema("app")
+}
+
+// 代表者（User）が発行するスタッフのログイン。スタッフは代表者のドライブの帳簿に登録し、
+// 自分が登録した分だけを見る・直す。パスワードは lib/password.ts で変換した値だけを持つ
+model Staff {
+  id               String    @id @default(cuid())
+  ownerId          String
+  owner            User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  // 全体で重複不可（ログイン画面では会社を選ばないため）。英小文字にそろえて保存する
+  loginId          String    @unique
+  displayName      String
+  passwordHash     String
+  // 削除・パスワード再設定のたびに増やす。ログイン中のトークンの値と違えば強制ログアウト
+  sessionVersion   Int       @default(0)
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime?
+  lastLoginAt      DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([ownerId])
   @@schema("app")
 }
