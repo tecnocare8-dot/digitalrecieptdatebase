@@ -245,6 +245,9 @@ export default function SettingsPage() {
               ? '💳 Proプランを再購入する（1,500円/年）'
               : '💳 StripeでProプラン（1,500円/年）にアップグレードする'}
           </button>
+          <p className="mt-3 text-xs text-gray-600">
+            運営：株式会社AwesomeLife　<Link href="/legal" className="underline">特定商取引法に基づく表記</Link>　<Link href="/privacy" className="underline">プライバシーポリシー</Link>
+          </p>
         </div>
 
       </div>

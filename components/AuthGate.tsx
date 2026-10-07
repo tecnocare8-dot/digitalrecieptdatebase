@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { SessionProvider, signIn, signOut, useSession } from 'next-auth/react';
 
 // lib/auth.ts の STAFF_LOCKED と同じ値（サーバー側の部品を画面に読み込まないよう文字列で持つ）
@@ -100,6 +102,9 @@ function Gate({ children }: { children: React.ReactNode }) {
             <p className="text-xs text-gray-500">スタッフの方は、代表者から受け取ったIDとパスワードで</p>
             <StaffLogin />
           </div>
+          <p className="text-xs text-gray-600">
+            運営：株式会社AwesomeLife　<Link href="/legal" className="underline">特定商取引法に基づく表記</Link>　<Link href="/privacy" className="underline">プライバシーポリシー</Link>
+          </p>
         </div>
       </main>
     );
@@ -109,7 +114,12 @@ function Gate({ children }: { children: React.ReactNode }) {
 }
 
 /** ログインしていない人にはログイン画面だけを表示する */
+// ログインしなくても見られるページ（特定商取引法の表記・プライバシーポリシー）
+const PUBLIC_PATHS = ['/legal', '/privacy'];
+
 export default function AuthGate({ children }: { children: React.ReactNode }) {
+  const path = usePathname();
+  if (PUBLIC_PATHS.includes(path)) return <>{children}</>;
   return (
     // 削除・再設定されたスタッフの画面を早めにログイン画面へ戻すため、5分ごとにセッションを確かめる
     <SessionProvider refetchInterval={300}>
